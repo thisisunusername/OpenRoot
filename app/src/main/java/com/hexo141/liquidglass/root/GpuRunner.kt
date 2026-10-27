@@ -162,6 +162,11 @@ object GpuRunner {
                     onLine("<e> cannot read ${suManager.ksudPath} from this app")
                     throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")
                 }
+                // Remove the old copy first. `cat > path` opening a file it cannot truncate -
+                // an earlier run left a 0666 one behind - makes cat exit before a single byte
+                // arrives, which surfaces here as `write failed: EPIPE`.
+                onLine("$ rm -f $STAGE_DIR/ksud")
+                AdbShell.exec(manager, "rm -f $STAGE_DIR/ksud")
                 onLine("$ cat > $STAGE_DIR/ksud    # ${ksudBytes.size} bytes")
                 AdbShell.push(manager, "$STAGE_DIR/ksud", ksudBytes)
                 onLine("$ chmod 755 $STAGE_DIR/ksud")
@@ -170,7 +175,7 @@ object GpuRunner {
 
                 val staged = AdbShell.exec(
                     manager,
-                    "test -x $STAGE_DIR/ksud && echo ok",
+                    "test -s $STAGE_DIR/ksud && test -x $STAGE_DIR/ksud && echo ok",
                 ).contains("ok")
                 if (!staged) {
                     onLine(stageDiagnostics(manager, suManager))

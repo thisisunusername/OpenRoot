@@ -200,6 +200,22 @@ class ShizukuStream(
         synchronized(lock) { lock.notifyAll() }
     }
 
+    /**
+     * Sends EOF on the child's stdin and waits for it to exit, without killing it.
+     *
+     * A `cat > file` only flushes when it sees the end of its input. Destroying the process instead
+     * left every pushed file behind as 0 bytes: the writes had gone into the pipe, but the child
+     * never got the chance to move them to disk.
+     */
+    override fun closeInput() {
+        runCatching { process.outputStream.close() }
+            .onFailure { Log.w(TAG, "closing stdin failed for $command", it) }
+            .onSuccess {
+                runCatching { process.waitForTimeout(STDIN_DRAIN_MS, TimeUnit.MILLISECONDS) }
+                    .onFailure { Log.v(TAG, "waiting for $command did not settle", it) }
+            }
+    }
+
     private companion object {
         const val TAG = "ShizukuStream"
 
@@ -208,5 +224,8 @@ class ShizukuStream(
 
         /** Upper bound on the reaper's wait; `AdbShell`'s own watchdog is the real deadline. */
         const val REAPER_TIMEOUT_MS = 600_000L
+
+        /** How long a writer waits for its command to finish after the stdin EOF. */
+        const val STDIN_DRAIN_MS = 30_000L
     }
 }

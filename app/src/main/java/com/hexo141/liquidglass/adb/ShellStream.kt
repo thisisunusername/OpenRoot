@@ -28,8 +28,22 @@ interface ShellStream : Closeable {
     fun read(bytes: ByteArray, offset: Int, length: Int): Int
 
     fun write(bytes: ByteArray, offset: Int, length: Int)
-
     fun flush()
+
+    /**
+     * Closes the writing half of the channel and nothing else, which is how a shell command learns
+     * that its stdin is finished.
+     *
+     * [close] is not a substitute: on the Shizuku transport it tears the child process down, so
+     * anything the child still had buffered - a `cat > file` in the middle of a write, for one -
+     * is lost. A caller that has just finished feeding a command must call this, let the command
+     * exit on its own, and only then [close] the channel.
+     *
+     * Default implementation falls back to [close] for channels with no separate write half.
+     */
+    fun closeInput() {
+        close()
+    }
 
     /**
      * A method rather than a property so it maps straight onto [AdbStream.isClosed] and stays

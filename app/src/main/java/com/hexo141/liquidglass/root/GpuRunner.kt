@@ -149,7 +149,12 @@ object GpuRunner {
                 "cp '${suManager.ksudPath}' $STAGE_DIR/ksud && chmod 755 $STAGE_DIR/ksud && echo ok",
             )
             onProgress(0.46f)
-            if (!copy.contains("ok")) {
+            // `echo ok` is the fast path, but a pipe can swallow it: on some OEM builds the copy
+            // succeeds and the confirmation never reaches us. Ask the filesystem instead of
+            // trusting the echo alone, otherwise a perfectly good stage looks like a failure.
+            val staged = copy.contains("ok") ||
+                AdbShell.exec(manager, "test -x $STAGE_DIR/ksud && echo ok").contains("ok")
+            if (!staged) {
                 onLine(copy.trim())
                 throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")
             }

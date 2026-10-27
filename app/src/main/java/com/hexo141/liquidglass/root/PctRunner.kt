@@ -138,7 +138,11 @@ object PctRunner {
                 "cp '${suManager.ksudPath}' $STAGE_DIR/ksud && chmod 755 $STAGE_DIR/ksud && echo ok",
             )
             onProgress(0.32f)
-            if (!copy.contains("ok")) {
+            // Same reason as GpuRunner: `echo ok` can be swallowed by a pipe even though the copy
+            // worked, so confirm against the filesystem too.
+            val staged = copy.contains("ok") ||
+                AdbShell.exec(manager, "test -x $STAGE_DIR/ksud && echo ok").contains("ok")
+            if (!staged) {
                 onLine(copy.trim())
                 throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")
             }

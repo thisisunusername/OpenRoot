@@ -5,9 +5,18 @@ import java.io.IOException
 
 /** Runs shell commands through the ADB connection. */
 object AdbShell {
+    /**
+     * Chunk size used when streaming a file into `cat`.
+     *
+     * Over ADB each write is answered with a READY before the next one goes out, so 32 KiB is free.
+     * Over Shizuku the stream is an ordinary pipe with no acknowledgement: the writer races `cat`
+     * for the pipe buffer, and a chunk the child cannot drain yet comes back as
+     * `write failed: EPIPE (Broken pipe)`. 8 KiB keeps the writer behind the reader.
+     */
+    private const val PUSH_CHUNK = 8 * 1024
 
-    /** Chunk size used when streaming a file into `cat`; each write waits for the daemon's READY. */
-    private const val PUSH_CHUNK = 32 * 1024
+    /** How many times [push] reopens the pipe after the child drops it mid-transfer. */
+    private const val PUSH_ATTEMPTS = 5
 
     /** A shell command that stops producing output for this long is treated as stuck. */
     private const val IDLE_TIMEOUT_MS = 15_000L
@@ -96,20 +105,37 @@ object AdbShell {
         return exitCode
     }
 
-    /** Writes [bytes] to [remotePath] through the daemon's shell. */
+    /**
+     * Writes [bytes] to [remotePath] through the daemon's shell.
+     *
+     * The stream is an unacknowledged pipe on the Shizuku transport, so a chunk can be refused
+     * with `EPIPE` while `cat` is still busy. Rather than fail the whole stage, reopen the pipe in
+     * append mode and continue from the offset reached so far; [PUSH_ATTEMPTS] bounds the retries.
+     */
     @Throws(Exception::class)
     fun push(manager: AbsAdbConnectionManager, remotePath: String, bytes: ByteArray) {
-        val stream = manager.openStream("shell:cat > '$remotePath'")
-        try {
-            var offset = 0
-            while (offset < bytes.size) {
-                val length = minOf(PUSH_CHUNK, bytes.size - offset)
-                stream.write(bytes, offset, length)
-                offset += length
+        var offset = 0
+        var attempts = 0
+        while (offset < bytes.size) {
+            // The first pass truncates, a retry appends: the prefix on disk is already correct.
+            val operator = if (offset == 0) ">" else ">>"
+            val stream = manager.openStream("shell:cat $operator '$remotePath'")
+            val startOfAttempt = offset
+            try {
+                while (offset < bytes.size) {
+                    val length = minOf(PUSH_CHUNK, bytes.size - offset)
+                    stream.write(bytes, offset, length)
+                    offset += length
+                }
+                stream.flush()
+            } catch (e: IOException) {
+                // The pipe broke mid-chunk: the bytes from the failed write may be half there, so
+                // resume from the last confirmed offset and let `>>` append the rest.
+                offset = startOfAttempt
+                if (++attempts >= PUSH_ATTEMPTS) throw e
+            } finally {
+                runCatching { stream.close() }
             }
-            stream.flush()
-        } finally {
-            runCatching { stream.close() }
         }
     }
 

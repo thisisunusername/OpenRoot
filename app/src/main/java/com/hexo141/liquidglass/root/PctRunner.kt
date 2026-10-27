@@ -132,32 +132,44 @@ object PctRunner {
         AdbShell.exec(manager, "chmod 644 $STAGE_DIR/openroot.xml")
 
         if (suManager != null) {
-            // Push the bytes instead of running `cp` on the device: some ROMs have no usable `cp`
-            // for the shell user, and a Shizuku pipe can drop the confirmation even when the copy
-            // works. `cat > path` plus a built-in chmod needs no external command.
+            // Already staged from an earlier run: keep it. Otherwise let the device copy it with
+            // `dd` (toybox ships dd even when cp is missing or unusable), and only fall back to
+            // pushing the bytes - a 4.76 MB transfer is the one that can hit EPIPE on a slow pipe.
             val alreadyStaged = AdbShell.exec(
                 manager,
                 "test -s $STAGE_DIR/ksud && test -x $STAGE_DIR/ksud && echo ok",
             ).contains("ok")
-
             if (alreadyStaged) {
                 onLine("$ test -x $STAGE_DIR/ksud    # already staged, skipping")
                 onProgress(0.32f)
             } else {
-                val ksudBytes = KsuManager.readKsud(suManager.ksudPath)
-                if (ksudBytes == null) {
-                    onLine("<e> cannot read ${suManager.ksudPath} from this app")
-                    throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")
+                onLine("$ dd if=${suManager.ksudPath} of=$STAGE_DIR/ksud")
+                AdbShell.exec(
+                    manager,
+                    "rm -f $STAGE_DIR/ksud; " +
+                        "dd if='${suManager.ksudPath}' of=$STAGE_DIR/ksud 2>&1; " +
+                        "chmod 755 $STAGE_DIR/ksud",
+                    timeoutMs = 120_000,
+                )
+                val copied = AdbShell.exec(
+                    manager,
+                    "test -s $STAGE_DIR/ksud && test -x $STAGE_DIR/ksud && echo ok",
+                ).contains("ok")
+                if (!copied) {
+                    val ksudBytes = KsuManager.readKsud(suManager.ksudPath)
+                    if (ksudBytes == null) {
+                        onLine("<e> cannot read ${suManager.ksudPath} from this app")
+                        throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")
+                    }
+                    onLine("$ cat > $STAGE_DIR/ksud    # ${ksudBytes.size} bytes")
+                    AdbShell.push(manager, "$STAGE_DIR/ksud", ksudBytes)
+                    onLine("$ chmod 755 $STAGE_DIR/ksud")
+                    AdbShell.exec(manager, "chmod 755 $STAGE_DIR/ksud")
                 }
-                onLine("$ cat > $STAGE_DIR/ksud    # ${ksudBytes.size} bytes")
-                AdbShell.push(manager, "$STAGE_DIR/ksud", ksudBytes)
-                onLine("$ chmod 755 $STAGE_DIR/ksud")
-                AdbShell.exec(manager, "chmod 755 $STAGE_DIR/ksud")
                 onProgress(0.32f)
-
                 val staged = AdbShell.exec(
                     manager,
-                    "test -x $STAGE_DIR/ksud && echo ok",
+                    "test -s $STAGE_DIR/ksud && test -x $STAGE_DIR/ksud && echo ok",
                 ).contains("ok")
                 if (!staged) {
                     throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")

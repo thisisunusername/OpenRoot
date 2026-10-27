@@ -143,33 +143,37 @@ object GpuRunner {
         AdbShell.exec(manager, "chmod 644 $STAGE_DIR/openroot.xml")
 
         if (suManager != null) {
-            // A previous run may have left a working ksud behind: /data/local/tmp survives app
-            // reinstalls, and staging it again is the step most likely to fail (a shell-uid
-            // process cannot always read the manager's native lib dir). If it is already there
-            // and executable, reuse it and skip the copy entirely.
+            // `cp` on the device is the wrong tool here. Some ROMs have no runnable `cp` for the
+            // shell user at all (`/system/bin/sh: shell:cp: inaccessible or not found`), and even
+            // when it works a Shizuku pipe can swallow the confirmation. The app can read the
+            // manager's library itself, so push the bytes the same way every other staged file
+            // goes out - `cat > path` - and then only chmod, which is one of sh's built-ins.
             val alreadyStaged = AdbShell.exec(
                 manager,
-                "test -x $STAGE_DIR/ksud && echo ok",
+                "test -s $STAGE_DIR/ksud && test -x $STAGE_DIR/ksud && echo ok",
             ).contains("ok")
 
             if (alreadyStaged) {
                 onLine("$ test -x $STAGE_DIR/ksud    # already staged, skipping")
                 onProgress(0.46f)
             } else {
-                onLine("$ cp ${suManager.ksudPath} $STAGE_DIR/ksud")
-                val copy = AdbShell.exec(
-                    manager,
-                    "cp '${suManager.ksudPath}' $STAGE_DIR/ksud && chmod 755 $STAGE_DIR/ksud && echo ok",
-                )
+                val ksudBytes = KsuManager.readKsud(suManager.ksudPath)
+                if (ksudBytes == null) {
+                    onLine("<e> cannot read ${suManager.ksudPath} from this app")
+                    throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")
+                }
+                onLine("$ cat > $STAGE_DIR/ksud    # ${ksudBytes.size} bytes")
+                AdbShell.push(manager, "$STAGE_DIR/ksud", ksudBytes)
+                onLine("$ chmod 755 $STAGE_DIR/ksud")
+                AdbShell.exec(manager, "chmod 755 $STAGE_DIR/ksud")
                 onProgress(0.46f)
-                // `echo ok` is the fast path, but a pipe can swallow it: on some OEM builds the
-                // copy succeeds and the confirmation never reaches us. Ask the filesystem instead
-                // of trusting the echo alone, otherwise a perfectly good stage looks like a
-                // failure.
-                val staged = copy.contains("ok") ||
-                    AdbShell.exec(manager, "test -x $STAGE_DIR/ksud && echo ok").contains("ok")
+
+                val staged = AdbShell.exec(
+                    manager,
+                    "test -x $STAGE_DIR/ksud && echo ok",
+                ).contains("ok")
                 if (!staged) {
-                    onLine(copy.trim())
+                    onLine(stageDiagnostics(manager, suManager))
                     throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")
                 }
             }
@@ -192,5 +196,31 @@ object GpuRunner {
         val handoff = RootHandoff.probe(manager, onLine, waitMs = 20_000)
         onProgress(1f)
         return Result(exitCode, handoff)
+    }
+
+    /**
+     * A one-shot report on why the staged binary cannot be run, so the log says something more
+     * useful than "cannot stage ksud".
+     */
+    private fun stageDiagnostics(
+        manager: AbsAdbConnectionManager,
+        suManager: KsuManager.Target,
+    ): String {
+        val report = StringBuilder("<e> staging failed, diagnostics:")
+        val commands = listOf(
+            "ls -l $STAGE_DIR/ksud",
+            "ls -ld $STAGE_DIR",
+            "id",
+            "which cp cat chmod sh",
+        )
+        for (command in commands) {
+            val result = runCatching { AdbShell.exec(manager, "$command 2>&1") }
+                .getOrElse { error -> "<e> $command: ${error.message}" }
+            report.append('\n').append("$ ").append(command)
+            report.append('\n').append(result.trim().ifEmpty { "(no output)" })
+        }
+        report.append('\n').append("<e> source was ")
+            .append(suManager.ksudPath)
+        return report.toString()
     }
 }

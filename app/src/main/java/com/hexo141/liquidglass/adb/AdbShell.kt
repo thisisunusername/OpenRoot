@@ -1,6 +1,7 @@
 package com.hexo141.liquidglass.adb
 
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 
 /** Runs shell commands through the ADB connection. */
@@ -111,9 +112,11 @@ object AdbShell {
      * disk once it sees the end of its input, so the channel's stdin is closed first and the child
      * is given time to exit. Killing the channel straight after the last byte used to leave every
      * pushed file at 0 bytes on the Shizuku transport.
+     *
+     * @return true when the bytes made it across in one pass
      */
     @Throws(Exception::class)
-    fun push(manager: AbsAdbConnectionManager, remotePath: String, bytes: ByteArray) {
+    fun push(manager: AbsAdbConnectionManager, remotePath: String, bytes: ByteArray): Boolean {
         var offset = 0
         var attempts = 0
         while (offset < bytes.size) {
@@ -138,6 +141,56 @@ object AdbShell {
                 runCatching { stream.close() }
             }
         }
+        return true
+    }
+
+    /**
+     * Stages [bytes] at [remotePath] using a file the shell can already read as the source.
+     *
+     * Feeding a shell command through its stdin is unreliable on the Shizuku transport: every
+     * `cat > file` came out 0 bytes no matter how carefully the write half was closed. A file the
+     * app writes into its own external cache directory sits on shared storage the `shell` user can
+     * read, so the copy happens entirely inside the device with `cat`, and nothing crosses the
+     * process boundary except the command line.
+     *
+     * Falls back to [push] when the cache directory is not usable.
+     *
+     * @param cacheDirectory a directory on shared storage the shell user can read
+     * @return a one-line description of what was used, for the log
+     */
+    @Throws(Exception::class)
+    fun stage(
+        manager: AbsAdbConnectionManager,
+        remotePath: String,
+        bytes: ByteArray,
+        cacheDirectory: File?,
+        fileName: String,
+        onLine: (String) -> Unit = {},
+    ): String {
+        if (cacheDirectory != null) {
+            val relay = runCatching {
+                cacheDirectory.mkdirs()
+                val file = File(cacheDirectory, fileName)
+                file.writeBytes(bytes)
+                file
+            }.getOrNull()
+
+            if (relay != null && relay.length() == bytes.size.toLong()) {
+                onLine("$ cat ${relay.absolutePath} > $remotePath")
+                AdbShell.exec(
+                    manager,
+                    "rm -f $remotePath; cat '${relay.absolutePath}' > '$remotePath'",
+                    timeoutMs = 120_000,
+                )
+                // Leave nothing behind on shared storage once the copy is done.
+                runCatching { relay.delete() }
+                return "relay"
+            }
+        }
+
+        onLine("$ cat > $remotePath    # ${bytes.size} bytes")
+        push(manager, remotePath, bytes)
+        return "stdin"
     }
 
     /**

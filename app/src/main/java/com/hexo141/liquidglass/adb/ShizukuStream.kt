@@ -7,6 +7,7 @@ import rikka.shizuku.ShizukuRemoteProcess
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -36,7 +37,14 @@ class ShizukuStream(
     /** Guards [outputDone] and the wait/notify handshake; [queue] itself is thread safe. */
     private val lock = Object()
 
-    /** Both pipes draining means the process wrote everything it is going to write. */
+    /**
+     * Set once the process has exited **and** both pumps have drained.
+     *
+     * Waiting for the pipes to reach EOF is not enough on its own: Shizuku hands back two separate
+     * pipes, and in practice one of them keeps `read()` blocked long after the child is gone, which
+     * left every `exec()` waiting for the idle watchdog and returning an empty string. The reaper
+     * below therefore watches the process itself, not the pipes.
+     */
     @Volatile
     private var outputDone = false
 
@@ -63,11 +71,57 @@ class ShizukuStream(
                 Log.v(TAG, "pump $name ended: ${e.message}")
             } finally {
                 runCatching { source.close() }
-                if (livePumps.decrementAndGet() == 0) {
-                    outputDone = true
-                }
+                livePumps.decrementAndGet()
+                maybeFinish()
                 synchronized(lock) { lock.notifyAll() }
             }
+        }
+    }
+
+    /**
+     * Waits for the child to exit, then stops trusting the pipes.
+     *
+     * Once the process is gone the pumps are drained as far as they will go: whatever is still
+     * queued is handed out, and the very next [read] reports EOF. Any pump that is still blocked in
+     * `read()` is released by closing its pipe, which is safe here because the writer is dead.
+     */
+    private inner class Reaper : Thread("shizuku-reaper") {
+        init {
+            isDaemon = true
+        }
+
+        override fun run() {
+            try {
+                // Bounded: a wedged child must not keep this thread (and the stream) alive forever.
+                process.waitForTimeout(REAPER_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } catch (e: Throwable) {
+                Log.v(TAG, "waitFor failed for $command: ${e.message}")
+            }
+            processGone = true
+            // Give the pumps a short grace period to drain what the child wrote, then cut them off.
+            val deadline = System.currentTimeMillis() + DRAIN_GRACE_MS
+            while (livePumps.get() > 0 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10)
+                if (queue.isEmpty() && livePumps.get() == 0) break
+            }
+            if (livePumps.get() > 0) {
+                pumps.forEach { runCatching { it.source.close() } }
+            }
+            maybeFinish()
+            synchronized(lock) { lock.notifyAll() }
+        }
+    }
+
+    @Volatile
+    private var processGone = false
+
+    /** Marks the stream finished once the child is gone and the pumps have stopped feeding it. */
+    private fun maybeFinish() {
+        if (!processGone || closed) return
+        if (livePumps.get() == 0 || queue.isEmpty()) {
+            outputDone = true
         }
     }
 
@@ -78,6 +132,7 @@ class ShizukuStream(
 
     init {
         pumps.forEach { it.start() }
+        Reaper().start()
     }
 
     @Throws(IOException::class)
@@ -147,5 +202,11 @@ class ShizukuStream(
 
     private companion object {
         const val TAG = "ShizukuStream"
+
+        /** How long the pumps may keep draining after the child exited before they are cut off. */
+        const val DRAIN_GRACE_MS = 300L
+
+        /** Upper bound on the reaper's wait; `AdbShell`'s own watchdog is the real deadline. */
+        const val REAPER_TIMEOUT_MS = 600_000L
     }
 }

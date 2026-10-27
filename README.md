@@ -1,11 +1,20 @@
 # OpenRoot
 ![](https://i.imgs.ovh/2026/10/25/292fd26f3d676ca825fd439e2da0f1b5.png)
-OpenRoot is an Android app that talks to the device's own ADB daemon over wireless debugging. It
-pairs once, remembers the key, reconnects without a pairing code, shows what the device actually is,
-and can run a bundled payload that grants temporary root on supported kernels.
+OpenRoot is an Android app that reaches the device's own ADB daemon through **one of two
+transports**: wireless debugging pairing, or **Shizuku**. It connects, shows what the device
+actually is, and can run a bundled payload that grants temporary root on supported kernels.
+
+The Shizuku transport exists because wireless debugging is not available everywhere — some devices
+ship an Android release older than 11, and some vendor builds strip the pairing service entirely. If
+Shizuku is installed and authorised, OpenRoot never needs a pairing code at all.
 
 ## Features
 
+- **Two transports, one pipeline.** Every shell command, file push and payload run goes through the
+  same `AdbShell` helper, so the exploit engines cannot tell which transport is in use.
+- **Shizuku transport.** When the Shizuku service is running and this app has been granted access,
+  commands run as a local process started by Shizuku (`/system/bin/sh -c …`). Nothing is paired and
+  no ADB key is stored.
 - **Wireless debugging pairing.** Discovers `_adb-tls-pairing._tcp` over mDNS, collects the six
   digit code from a notification, and completes the ADB pairing handshake (TLS 1.3 keying material
   export, SPAKE2 over edwards25519, AES-128-GCM peer info exchange).
@@ -40,25 +49,41 @@ and can run a bundled payload that grants temporary root on supported kernels.
 
 | Item | Requirement |
 | --- | --- |
-| Pairing | Android 11 (API 30) or newer, wireless debugging enabled |
+| Shizuku transport | Shizuku app installed and running (root or ADB), access granted to OpenRoot |
+| Pairing transport | Android 11 (API 30) or newer, wireless debugging enabled |
 | Payload | `arm64-v8a` device |
-| Build | JDK 17+, Android SDK with API 36, Android NDK r27d |
+| Build | JDK 17+, Android SDK with API 36; NDK r27d only when rebuilding the payloads |
 
-The UI itself runs from Android 7.0 (API 24), but pairing and the payload need newer releases.
+The UI itself runs from Android 7.0 (API 24). The Shizuku transport works on any release where
+Shizuku itself works, which is the whole reason it exists; wireless debugging pairing and the payload
+need newer releases.
+
+If Shizuku is granted as **root**, commands run as uid 0. If it is granted through **ADB**
+(uid 2000) — the usual case — the payload still runs as `shell`, which is exactly what an ADB
+connection would give you.
 
 ## Build
 
 1. Point Gradle at the SDK (`local.properties`, `sdk.dir`).
-2. Install Android NDK r27d. The build looks for it in this order:
-   `ndk.dir` in `local.properties` → `ANDROID_NDK_HOME` → `NDK_ROOT` → `D:/android-ndk-r27d`.
-3. Build:
+2. Build:
 
 ```sh
 ./gradlew :app:assembleDebug
 ```
 
-The APK contains the native payloads under `lib/arm64-v8a/` and every bundled kernel profile
-(`assets/kernel_profiles/*.bin`). All of them are produced by the build itself:
+The native payloads are committed **prebuilt** in `app/src/main/jniLibs/arm64-v8a/`, so a plain
+build needs no NDK. They are extracted from a published release APK and packaged as-is; the tasks
+below only run when you ask for them.
+
+To rebuild the payloads from source instead, set `OPENROOT_BUILD_NATIVE=1` and install NDK r27d.
+The build looks for it in this order:
+`ndk.dir` in `local.properties` → `ANDROID_NDK_HOME` → `NDK_ROOT` → `D:/android-ndk-r27d`.
+
+```sh
+OPENROOT_BUILD_NATIVE=1 ./gradlew :app:assembleDebug
+```
+
+With that flag set, the payloads are produced by these tasks (otherwise each is skipped):
 
 - `buildNativeExploit` runs the NDK `make` over `native/` and produces `build/native/ghostlock`.
 - `buildNativePageCache` produces `libopenroot.so` and `libopenbootstrap.so` in `build/or`.
@@ -79,37 +104,65 @@ make -C native-pct payload      # writes build/pct/libpct-opace6.so
 
 ## Usage
 
+### With Shizuku
+
+1. Install [Shizuku](https://shizuku.rikka.app/) and start it (root, or ADB from a computer).
+2. Open OpenRoot. If the service is running, the primary button reads **Grant Shizuku access**;
+   tap it and allow the request in the Shizuku dialog.
+3. The app connects immediately. There is nothing to pair and no code to type.
+
+### With wireless debugging
+
 1. Enable **Wireless debugging** in Developer options on the device.
 2. Open OpenRoot and tap **Start pairing**. The app keeps a foreground notification while it looks
    for the pairing service.
 3. Open **Pair device with pairing code** on the device, then enter the six digit code in the
    notification. Once it succeeds, the pairing button is hidden.
-4. From then on the app connects by itself. The status card shows `Supported`, `Untested` or
-   `Unsupported` for the connected device.
-5. Once connected, **Exploit** appears above the log area (it stays hidden until adbd is paired and
-   connected). Tap it to open the engine picker. It lists four CVE ids; a row explains why it cannot
-   run (no profile for this kernel, no ported build, GPU not supported, kernel not covered by the
-   module images, payload not packaged for this ABI). The payload that fits the connected device is
-   chosen after the row is picked. The native log is shown at the bottom of the screen.
+4. From then on the app connects by itself.
+
+### Running an exploit
+
+Once connected, **Exploit** appears above the log area (it stays hidden until a transport is up).
+Tap it to open the engine picker. It lists four CVE ids; a row explains why it cannot run (no profile
+for this kernel, no ported build, GPU not supported, kernel not covered by the module images, payload
+not packaged for this ABI). The payload that fits the connected device is chosen after the row is
+picked. The native log is shown at the bottom of the screen.
+
+The status card shows `Supported`, `Untested` or `Unsupported` for the connected device.
 
 ## How it works
 
 ```
 MainActivity ──┬─ AdbPairingService ── mDNS ── PairingConnectionCtx ── PairingAuthCtx ── Spake2
                │                                                └── TLS 1.3 (bundled Conscrypt)
-               ├─ AdbConnectionManager ── AdbConnection ── AdbShell ── getprop / uname / getenforce
+               ├─ AdbConnectionManager ──┬─ Transport.ADB     ── AdbConnection ─┐
+               │                         └─ Transport.SHIZUKU ── ShizukuShell ──┤
+               │                                                                └─ ShellStream
+               ├─ AdbShell ── getprop / uname / getenforce / push / exec
                ├─ RootExploit    ── payload + profile ── /data/local/tmp/openroot
                ├─ DirtyFragRunner ── module + bootstrap ── /data/local/tmp/openroot
                ├─ GpuRunner      ── cheese + bootstrap ── /data/local/tmp/openroot
                └─ PctRunner      ── pct payload + bootstrap ── /data/local/tmp/openroot
 ```
 
+- **`ShellStream` is the seam between the two transports.** It is a five-member interface
+  (`read`, `write`, `flush`, `isClosed`, `close`) implemented twice: `AdbStreamAdapter` wraps an
+  `AdbStream` on the ADB TLS connection, and `ShizukuStream` wraps a `ShizukuRemoteProcess` and
+  merges its stdout and stderr into one queue, because an ADB `shell:` service already interleaves
+  them and the payload pipeline must not be able to tell the difference.
+- **`AdbConnectionManager` picks a transport.** It tries Shizuku first (no key material, no mDNS
+  round trip) and falls back to the paired wireless debugging connection. `AbsAdbConnectionManager`
+  holds a `ShellProvider` delegate, so `manager.openStream("shell:…")` works unchanged for both.
 - Pairing TLS uses the Conscrypt copy bundled in the APK, so `exportKeyingMaterial` is a normal
   library call instead of a hidden-API reflection into the platform provider.
 - SPAKE2 is implemented in plain Java (`crypto/spake2`) on top of a small self-contained
   edwards25519 group (`Ed25519Group`). The mask points are the standard SPAKE2 `M` and `N`.
-- The shell helpers in `adb/AdbShell.kt` stream commands over the ADB connection; the same channel
-  is used to push the payload and its profile.
+- The shell helpers in `adb/AdbShell.kt` stream commands over whichever transport is live; the same
+  channel is used to push the payload and its profile.
+
+One behaviour difference: a Shizuku process is a plain pipe, not a tty, so output arrives in 4 KiB
+blocks instead of line by line. `AdbShell` already frames commands with an explicit exit marker, so
+nothing above it cares.
 
 ## Supported kernels and adding a new device
 
@@ -208,9 +261,27 @@ app/src/main/assets/kernel_profiles/   bundled kernel profiles
 
 ## Continuous integration
 
-`.github/workflows/android.yml` builds on every push to `main`: it installs JDK 17 and NDK r27d,
-runs `./gradlew assembleRelease` with `ANDROID_NDK_HOME` set, signs the APK, and publishes a release
-tagged with the Beijing date.
+`.github/workflows/android.yml` builds on every push to `main`, on pull requests, and on demand
+(**Run workflow** in the Actions tab). It installs JDK 21, runs `./gradlew :app:assembleDebug` — the
+payloads are committed prebuilt, so no NDK and no signing secrets are needed — then uploads the APK
+as a build artifact (kept 30 days) and publishes a release tagged with the Beijing date plus
+`-shizuku`.
+
+## Differences from upstream
+
+This tree adds the Shizuku transport on top of
+[`hexo141/Openroot`](https://github.com/hexo141/Openroot). Everything else — the four CVE engines,
+the kernel profiles, the liquid glass UI — is unchanged.
+
+- New: `adb/ShellStream.kt`, `adb/AdbStreamAdapter.kt`, `adb/ShizukuStream.kt`, `adb/ShizukuShell.kt`.
+- Changed: `adb/AbsAdbConnectionManager.java` (a `ShellProvider` delegate plus a `ShellStream`
+  `openStream`), `adb/AdbShell.kt`, `adb/AdbConnectionManager.kt`, `MainActivity.kt`,
+  `ui/PairingScreen.kt`, `AndroidManifest.xml`, `gradle/libs.versions.toml`,
+  `app/build.gradle.kts`, `.gitignore`, this workflow.
+- Shizuku dependency: `dev.rikka.shizuku:api:13.0.0` and `:provider:13.0.0`. `Shizuku#newProcess`
+  became `private` in 13.1.5 and is slated for removal in API 14, so this is pinned deliberately;
+  moving past it means switching to a `UserService`, which needs AIDL and a bound-service lifecycle
+  the payload runners do not currently have.
 
 ## License
 

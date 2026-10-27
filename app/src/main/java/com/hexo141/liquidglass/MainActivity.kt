@@ -25,6 +25,8 @@ import com.hexo141.liquidglass.adb.AdbConnectionManager
 import com.hexo141.liquidglass.adb.AdbKeyManager
 import com.hexo141.liquidglass.adb.AdbPairingService
 import com.hexo141.liquidglass.adb.PairingState
+import com.hexo141.liquidglass.adb.ShizukuShell
+import rikka.shizuku.Shizuku
 import com.hexo141.liquidglass.consent.ConsentStore
 import com.hexo141.liquidglass.device.DeviceInfo
 import com.hexo141.liquidglass.root.DirtyFragRunner
@@ -66,6 +68,9 @@ class MainActivity : AppCompatActivity() {
         /** How long to wait for `_adb-tls-connect._tcp` before giving up on a direct connect. */
         const val CONNECT_TIMEOUT_MS = 6_000L
 
+        /** Request code for the Shizuku permission dialog; only its own answer matters. */
+        const val SHIZUKU_PERMISSION_REQUEST = 0x5A17
+
         /** Give adbd a moment to publish the connect service after the pairing handshake. */
         const val CONNECT_AFTER_PAIR_DELAY_MS = 700L
 
@@ -97,6 +102,9 @@ class MainActivity : AppCompatActivity() {
 
     /** Direct connect failed: show the pairing button again so a code can be used. */
     private val needsPairing = mutableStateOf(false)
+
+    /** Mirrors [ShizukuShell.status] so the screen can swap the pairing button for a grant button. */
+    private val shizukuStatus = mutableStateOf(ShizukuShell.Status.NOT_INSTALLED)
 
     /** Device info: local props first, replaced by the values read over ADB once connected. */
     private val deviceInfo = mutableStateOf<DeviceInfo?>(null)
@@ -208,6 +216,12 @@ class MainActivity : AppCompatActivity() {
 
         consentAccepted.value = ConsentStore.isAccepted(this)
 
+        // Shizuku listeners: the binder can arrive late (Shizuku started after this app) and the
+        // user can grant access at any moment, so the connection state is re-evaluated on each event.
+        ShizukuShell.addPermissionListener(shizukuPermissionListener)
+        ShizukuShell.addBinderAliveListener(shizukuBinderAliveListener)
+        ShizukuShell.addBinderDeadListener(shizukuBinderDeadListener)
+
         // Back closes the log page or the picker first, and only then leaves the app.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -239,6 +253,7 @@ class MainActivity : AppCompatActivity() {
                                 connecting = connecting.value,
                                 connected = connected.value,
                                 needsPairing = needsPairing.value,
+                                shizukuStatus = shizukuStatus.value,
                                 supportState = supportState.value,
                                 engineLabel = engineLabel.value,
                                 deviceInfo = deviceInfo.value,
@@ -327,11 +342,53 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        ShizukuShell.removePermissionListener(shizukuPermissionListener)
+        ShizukuShell.removeBinderAliveListener(shizukuBinderAliveListener)
+        ShizukuShell.removeBinderDeadListener(shizukuBinderDeadListener)
         vivoController?.dispose()
         vivoController = null
         vivoScope.cancel()
         refreshHandler.removeCallbacksAndMessages(null)
         super.onDestroy()
+    }
+
+    // ------------------------------------------------------------- Shizuku plumbing
+
+    /** The user answered the Shizuku dialog: connect if granted, otherwise say why not. */
+    private val shizukuPermissionListener =
+        Shizuku.OnRequestPermissionResultListener { _, grantResult ->
+            runOnUiThread {
+                if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                    Log.i(TAG, "Shizuku permission granted (${ShizukuShell.describePrivilege()})")
+                    connect()
+                } else {
+                    Log.w(TAG, "Shizuku permission denied")
+                    toast(R.string.shizuku_permission_denied)
+                    refreshState()
+                }
+            }
+        }
+
+    /** Shizuku was (re)started: a granted app can connect immediately, an ungranted one is asked. */
+    private val shizukuBinderAliveListener = Shizuku.OnBinderReceivedListener {
+        runOnUiThread {
+            Log.i(TAG, "Shizuku binder received")
+            autoConnectTried = false
+            maybeAutoConnect()
+        }
+    }
+
+    /** Shizuku died: whatever ran through it is gone, so the UI must stop claiming it is connected. */
+    private val shizukuBinderDeadListener = Shizuku.OnBinderDeadListener {
+        runOnUiThread {
+            Log.i(TAG, "Shizuku binder died")
+            // Only the local transport is affected; an ADB connection survives.
+            if (AdbConnectionManager.isUsingShizuku()) {
+                AdbConnectionManager.get(this).useShizuku(false)
+            }
+            autoConnectTried = false
+            refreshState()
+        }
     }
 
     private fun ensureVivoController(): VivoWiredController {
@@ -355,6 +412,8 @@ class MainActivity : AppCompatActivity() {
         pairingSucceeded: Boolean = false,
     ) {
         if (updatePairing) pairingRunning.value = AdbPairingService.isRunning()
+        // Cheap enough to poll: one binder ping plus one permission check.
+        shizukuStatus.value = ShizukuShell.status()
         val wasPaired = paired.value
         val isPaired = PairingState(this).isPaired
         paired.value = isPaired
@@ -391,6 +450,19 @@ class MainActivity : AppCompatActivity() {
     private fun maybeAutoConnect() {
         if (autoConnectTried) return
         if (pairingRunning.value || connected.value || connecting.value) return
+        // Shizuku is ready and already granted: connect without any ADB key or pairing at all.
+        if (ShizukuShell.isReady()) {
+            autoConnectTried = true
+            connect()
+            return
+        }
+        // Shizuku is installed and running but not granted yet; ask once, the answer is handled
+        // by the permission listener which then calls maybeAutoConnect again.
+        if (ShizukuShell.status() == ShizukuShell.Status.PERMISSION_REQUIRED) {
+            autoConnectTried = true
+            ShizukuShell.requestPermission(SHIZUKU_PERMISSION_REQUEST)
+            return
+        }
         val isPaired = paired.value
         if (!isPaired && !AdbKeyManager.hasStoredKey(this)) return
         autoConnectTried = true
@@ -403,20 +475,30 @@ class MainActivity : AppCompatActivity() {
         needsPairing.value = false
         Thread({
             val outcome = runCatching {
-                AdbConnectionManager.get(this).connectTls(this, CONNECT_TIMEOUT_MS)
+                // Shizuku first: it needs no pairing and works on devices without wireless debugging.
+                // Falls back to the original ADB TLS path when Shizuku is unavailable.
+                AdbConnectionManager.get(this).connect(this, CONNECT_TIMEOUT_MS)
             }
             runOnUiThread {
                 connecting.value = false
                 if (outcome.getOrNull() == true) {
                     connected.value = true
                     supportState.value = SupportState.Checking
+                    // A Shizuku connection has no notion of "paired", so the flag is set anyway:
+                    // every later code path treats it as "do not ask the user for a code".
                     paired.value = true
                     PairingState(this).isPaired = true
-                    Log.i(TAG, "connected without pairing code")
+                    Log.i(TAG, "connected via ${AdbConnectionManager.get(this).activeTransport()}")
                     loadDeviceInfo()
                 } else {
                     val error = outcome.exceptionOrNull()
-                    Log.w(TAG, "direct connect failed (silent=$silent)", error)
+                    Log.w(TAG, "connect failed (silent=$silent)", error)
+                    // Nothing to ask the user for when Shizuku is the reason we are not connected:
+                    // the fix is in the Shizuku app, not in a pairing code.
+                    if (ShizukuShell.isBinderAlive()) {
+                        toast(R.string.shizuku_permission_required)
+                        return@runOnUiThread
+                    }
                     if (silent) return@runOnUiThread
                     // adbd rejected our key: the pairing is really gone
                     if (error is AdbAuthenticationFailedException) {
@@ -530,6 +612,10 @@ class MainActivity : AppCompatActivity() {
         when {
             pairingRunning.value -> stopPairing()
             connecting.value -> Unit // already busy
+            // Shizuku running but not granted yet: the button only exists to open that dialog.
+            !connected.value &&
+                ShizukuShell.status() == ShizukuShell.Status.PERMISSION_REQUIRED ->
+                ShizukuShell.requestPermission(SHIZUKU_PERMISSION_REQUEST)
             else -> requestStart()
         }
     }

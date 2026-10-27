@@ -69,6 +69,16 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Listen for Android wireless debugging (ADB) pairing requests and pair on user input" />
         </service>
+
+        <!-- Shizuku: the provider is how the Shizuku server hands its binder to this app.
+             INTERACT_ACROSS_USERS_FULL keeps other apps from querying it. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 
 </manifest>

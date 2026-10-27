@@ -19,6 +19,10 @@ constraintlayout = "2.1.4"
 annotation = "1.9.1"
 bouncycastle = "1.81"
 conscrypt = "2.5.3"
+# 13.0.0 is the last release where Shizuku#newProcess is still public; 13.1.5 made it
+# private and API 14 removes it. It is deprecated upstream in favour of UserService, but
+# this app only needs to run shell commands, so the simple API is enough.
+shizuku = "13.0.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -34,6 +38,10 @@ androidx-annotation = { group = "androidx.annotation", name = "annotation", vers
 bouncycastle-prov = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.ref = "bouncycastle" }
 bouncycastle-pkix = { group = "org.bouncycastle", name = "bcpkix-jdk18on", version.ref = "bouncycastle" }
 conscrypt-android = { group = "org.conscrypt", name = "conscrypt-android", version.ref = "conscrypt" }
+
+# Shizuku: run shell commands with shell (uid 2000) identity without wireless debugging
+shizuku-api = { group = "dev.rikka.shizuku", name = "api", version.ref = "shizuku" }
+shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref = "shizuku" }
 
 # Liquid Glass effect library
 kyant-backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }

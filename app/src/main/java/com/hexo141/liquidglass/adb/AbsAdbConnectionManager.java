@@ -38,6 +38,38 @@ public abstract class AbsAdbConnectionManager implements Closeable {
     private boolean mThrowOnUnauthorised = false;
 
     /**
+     * When set, every {@code shell:} request is served by this delegate instead of {@link AdbConnection}.
+     *
+     * This is how the app runs on devices without wireless debugging: {@code ShizukuShell} starts a
+     * local process with shell privilege, and no ADB daemon, mDNS or pairing code is involved.
+     * Keeping the hook here (rather than in every payload runner) means the runners stay
+     * transport-neutral.
+     */
+    @Nullable
+    private volatile ShellProvider mLocalShell;
+
+    /** A transport that hands out shell channels without an ADB connection. */
+    public interface ShellProvider {
+        /** @param destination an ADB service name, e.g. {@code shell:ls -l} or {@code shell,pty:...} */
+        @NonNull
+        ShellStream openShellStream(@NonNull String destination) throws IOException;
+    }
+
+    /** Switches this manager to a non-ADB transport, e.g. Shizuku. Pass {@code null} to go back. */
+    public void setLocalShell(@Nullable ShellProvider provider) {
+        mLocalShell = provider;
+        if (provider != null) {
+            mHostAddress = "local";
+        }
+    }
+
+    /** @return the delegate set by {@link #setLocalShell(ShellProvider)}, or {@code null} for ADB. */
+    @Nullable
+    public ShellProvider getLocalShell() {
+        return mLocalShell;
+    }
+
+    /**
      * Return generated/stored private key.
      */
     @NonNull
@@ -156,11 +188,13 @@ public abstract class AbsAdbConnectionManager implements Closeable {
     }
 
     /**
-     * Check if it is connected to an ADB daemon.
+     * Check if a shell channel can be opened: either an ADB daemon is connected, or a local
+     * transport such as Shizuku took over.
      *
      * @return {@code true} if connected, {@code false} otherwise.
      */
     public boolean isConnected() {
+        if (mLocalShell != null) return true;
         synchronized (mLock) {
             return mAdbConnection != null && mAdbConnection.isConnected() && mAdbConnection.isConnectionEstablished();
         }
@@ -396,8 +430,11 @@ public abstract class AbsAdbConnectionManager implements Closeable {
     }
 
     /**
-     * Opens an {@link AdbStream} object corresponding to the specified destination.
+     * Opens a {@link ShellStream} corresponding to the specified destination.
      * This routine will block until the connection completes.
+     *
+     * When a local transport is installed via {@link #setLocalShell(ShellProvider)} (Shizuku), the
+     * request is handed to it and no ADB connection is touched at all.
      *
      * @param destination The destination to open on the target
      * @return {@link AdbStream} object corresponding to the specified destination
@@ -407,37 +444,15 @@ public abstract class AbsAdbConnectionManager implements Closeable {
      */
     @WorkerThread
     @NonNull
-    public AdbStream openStream(String destination) throws IOException, InterruptedException {
-        synchronized (mLock) {
-            if (mAdbConnection != null && mAdbConnection.isConnected()) {
-                try {
-                    return mAdbConnection.open(destination);
-                } catch (AdbPairingRequiredException e) {
-                    throw new IllegalStateException(e);
-                }
-            }
-            throw new IOException("Not connected to ADB.");
+    public ShellStream openStream(String destination) throws IOException, InterruptedException {
+        ShellProvider local = mLocalShell;
+        if (local != null) {
+            return local.openShellStream(destination);
         }
-    }
-
-    /**
-     * Opens an {@link AdbStream} object corresponding to the specified destination.
-     * This routine will block until the connection completes.
-     *
-     * @param service The service to open. One of the services under {@link LocalServices.Services}.
-     * @param args    Additional arguments supported by the service (see the corresponding constant to learn more).
-     * @return AdbStream object corresponding to the specified destination
-     * @throws UnsupportedEncodingException If the destination cannot be encoded to UTF-8
-     * @throws IOException                  If the stream fails while sending the packet
-     * @throws InterruptedException         If we are unable to wait for the connection to finish
-     */
-    @NonNull
-    public AdbStream openStream(@LocalServices.Services int service, @NonNull String... args)
-            throws IOException, InterruptedException {
         synchronized (mLock) {
             if (mAdbConnection != null && mAdbConnection.isConnected()) {
                 try {
-                    return mAdbConnection.open(service, args);
+                    return new AdbStreamAdapter(mAdbConnection.open(destination));
                 } catch (AdbPairingRequiredException e) {
                     throw new IllegalStateException(e);
                 }

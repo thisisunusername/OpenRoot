@@ -117,7 +117,7 @@ object AdbShell {
      * Closes the stream when it stops producing data, so a daemon that never answers cannot leave a
      * caller waiting forever.
      */
-    private class StreamWatchdog(private val stream: AdbStream, private val timeoutMs: Long) {
+    private class StreamWatchdog(private val stream: ShellStream, private val timeoutMs: Long) {
         @Volatile
         private var lastActivity = System.currentTimeMillis()
 
@@ -152,8 +152,10 @@ object AdbShell {
         manager: AbsAdbConnectionManager,
         command: String,
         pty: Boolean,
-    ): AdbStream {
+    ): ShellStream {
         if (pty) {
+            // Shizuku has no terminal, so `shell,pty:` is passed through only when the destination
+            // is really an ADB service; a local transport ignores the suffix itself.
             runCatching { return manager.openStream("shell,pty:$command") }
         }
         return manager.openStream("shell:$command")

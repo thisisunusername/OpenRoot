@@ -40,6 +40,15 @@
     <string name="adb_disconnect">Disconnect</string>
     <string name="adb_connect_failed_fallback">Direct connection failed, pair with a code</string>
 
+    <!-- Shizuku: the alternative to wireless debugging, works on every Android 6.0+ device -->
+    <string name="shizuku_permission_required">Grant OpenRoot access in Shizuku, then try again</string>
+    <string name="shizuku_not_running">Shizuku is not running. Start it first.</string>
+    <string name="shizuku_not_installed">Shizuku is not installed</string>
+    <string name="shizuku_permission_denied">Shizuku access was denied. Re-enable it in Shizuku\'s app list.</string>
+    <string name="shizuku_ready">Shizuku ready</string>
+    <string name="shizuku_grant">Grant Shizuku access</string>
+    <string name="shizuku_privilege">Privilege: %1$s</string>
+
     <!-- Temporary root -->
     <string name="exploit_button">Exploit</string>
     <string name="exploit_running">Exploiting…</string>

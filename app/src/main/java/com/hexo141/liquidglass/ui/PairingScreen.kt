@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hexo141.liquidglass.R
+import com.hexo141.liquidglass.adb.ShizukuShell
 import com.hexo141.liquidglass.device.DeviceInfo
 import com.kyant.backdrop.Backdrop
 
@@ -64,6 +65,8 @@ fun PairingScreen(
     connecting: Boolean,
     connected: Boolean,
     needsPairing: Boolean,
+    /** State of the Shizuku link; drives whether the primary button grants Shizuku or pairs. */
+    shizukuStatus: ShizukuShell.Status,
     supportState: SupportState,
     engineLabel: String?,
     deviceInfo: DeviceInfo?,
@@ -86,12 +89,20 @@ fun PairingScreen(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) Color.Black.copy(alpha = 0.3f)
         else Color.Unspecified
 
+    // Shizuku is the preferred route: it needs no wireless debugging and no pairing code, so when
+    // it is usable the ADB pairing button is never shown at all.
+    val shizukuUsable = shizukuStatus == ShizukuShell.Status.READY ||
+        shizukuStatus == ShizukuShell.Status.PERMISSION_REQUIRED
     // Hidden once paired; only a failed direct connect (needsPairing) brings it back.
-    val showPairingButton = !paired || needsPairing
+    val showPairingButton = (!paired || needsPairing) && !shizukuUsable
 
     val statusText = when {
         connecting -> "Connecting…"
         connected -> "Connected"
+        shizukuStatus == ShizukuShell.Status.READY -> "Shizuku ready"
+        shizukuStatus == ShizukuShell.Status.PERMISSION_REQUIRED -> "Shizuku access needed"
+        shizukuStatus == ShizukuShell.Status.PERMISSION_DENIED -> "Shizuku access denied"
+        shizukuStatus == ShizukuShell.Status.NOT_RUNNING -> "Shizuku not running"
         paired -> "Waiting for adbd"
         else -> "Not paired"
     }
@@ -221,7 +232,22 @@ fun PairingScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            if (showPairingButton) {
+            // One primary action: grant Shizuku when it is the transport, otherwise the pairing
+            // button, which is the only route on devices that have wireless debugging.
+            if (shizukuStatus == ShizukuShell.Status.PERMISSION_REQUIRED && !connected) {
+                LiquidGlassButton(
+                    onClick = onToggle,
+                    backdrop = backdrop,
+                    surfaceColor = glassSurfaceColor,
+                    height = 50.dp,
+                    horizontalPadding = 22.dp
+                ) {
+                    BasicText(
+                        text = stringResource(R.string.shizuku_grant),
+                        style = buttonTextStyle()
+                    )
+                }
+            } else if (showPairingButton) {
                 LiquidGlassButton(
                     onClick = onToggle,
                     backdrop = backdrop,
@@ -236,6 +262,20 @@ fun PairingScreen(
                         style = buttonTextStyle()
                     )
                 }
+            } else if (shizukuStatus == ShizukuShell.Status.NOT_RUNNING && !connected) {
+                // Shizuku is installed but stopped; the only thing the user can do is start it.
+                BasicText(
+                    text = stringResource(R.string.shizuku_not_running),
+                    style = TextStyle(
+                        color = Color.White.copy(alpha = 0.78f),
+                        fontSize = 12.sp,
+                        shadow = Shadow(
+                            color = Color.Black.copy(alpha = 0.45f),
+                            offset = Offset(0f, 1f),
+                            blurRadius = 6f
+                        )
+                    )
+                )
             }
         }
 

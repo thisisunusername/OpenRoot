@@ -2,80 +2,72 @@ name: Android CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
+  # Lets you start a build by hand from the Actions tab.
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     permissions:
       contents: write
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up JDK 17
+    # AGP 9.3 needs 17 or newer; 21 matches what the project is developed against.
+    - name: Set up JDK 21
       uses: actions/setup-java@v4
       with:
-        java-version: '17'
+        java-version: '21'
         distribution: 'temurin'
         cache: gradle
 
-    # 临时 root 载荷（native/）需要用 NDK r27d 交叉编译成 arm64 二进制
-    - name: Set up NDK
-      id: setup-ndk
-      uses: nttld/setup-ndk@v1
-      with:
-        ndk-version: r27d
-        add-to-path: false
+    # The native payloads are committed prebuilt in app/src/main/jniLibs/arm64-v8a (extracted
+    # from the published release APK), so no NDK is installed. Set OPENROOT_BUILD_NATIVE=1 and
+    # add the nttld/setup-ndk step back if you want them compiled from source instead.
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    # 1. 获取北京时间日期并设置为环境变量
+    # 1. Beijing date, used for the artifact name and the release tag
     - name: Set version and date
       run: |
         DATE=$(TZ='Asia/Shanghai' date +'%Y%m%d')
         echo "DATE=$DATE" >> $GITHUB_ENV
         echo "VERSION=v$DATE" >> $GITHUB_ENV
 
-    # 2. 构建 Release APK（未签名）
-    - name: Build Release APK
-      run: ./gradlew assembleRelease
-      env:
-        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+    # 2. Build a debug APK. It is signed with the standard debug key, so it installs on any
+    #    device without creating a keystore or adding repository secrets.
+    - name: Build Debug APK
+      run: ./gradlew :app:assembleDebug --stacktrace
 
-    # 3. 使用 r0adkll/sign-android-release 对 APK 签名
-    - name: Sign APK
-      id: sign_app
-      uses: r0adkll/sign-android-release@v1
-      with:
-        releaseDirectory: app/build/outputs/apk/release
-        signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-        alias: ${{ secrets.ALIAS }}
-        keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-        keyPassword: ${{ secrets.KEY_PASSWORD }}
-      env:
-        BUILD_TOOLS_VERSION: "34.0.0"
-
-    # 4. 将签名后的 APK 重命名为 v年月日.apk
+    # 3. Rename so the artifact always carries the build date
     - name: Rename APK
       run: |
-        mv ${{ steps.sign_app.outputs.signedReleaseFile }} app/build/outputs/apk/release/$VERSION.apk
-        echo "重命名完成，当前文件列表:"
-        ls -la app/build/outputs/apk/release/
+        mkdir -p dist
+        cp app/build/outputs/apk/debug/app-debug.apk "dist/OpenRoot-shizuku-$VERSION.apk"
+        ls -la dist/
 
-    # 5. 创建 GitHub Release 并上传已签名的 APK
-    - name: Create GitHub Release and Upload Assets
+    # 4. Always keep the APK, whether or not a release is created
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: OpenRoot-shizuku-${{ env.VERSION }}
+        path: dist/*.apk
+        retention-days: 30
+
+    # 5. On a push to the default branch, also publish it as a release asset.
+    #    Uses GITHUB_TOKEN, no extra secrets required.
+    - name: Publish Release
       if: github.event_name == 'push'
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ env.VERSION }}
-        name: ${{ env.VERSION }}
+        tag_name: ${{ env.VERSION }}-shizuku
+        name: ${{ env.VERSION }}-shizuku
         generate_release_notes: true
-        files: |
-          app/build/outputs/apk/release/${{ env.VERSION }}.apk
+        files: dist/*.apk
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

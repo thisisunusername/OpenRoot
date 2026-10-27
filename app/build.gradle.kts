@@ -56,14 +56,19 @@ android {
 // ---------------------------------------------------------------------------
 // Native payloads
 //
-// Four engines ship as arm64 executables in jniLibs:
+// The payloads are committed prebuilt in src/main/jniLibs/arm64-v8a, extracted from the
+// published release APK:
 //   native/      kernel-profile payload (libghostlock.so)
 //   native-or/   page cache payload     (libopenroot.so + libopenbootstrap.so)
 //   native-gpu/  Adreno GPU payloads    (libcheese-quest.so + libcheese-snapdragon.so)
 //   native-pct/  posix-cpu-timers UAF   (libpct-opace6.so)
-// All are compiled with the NDK, copied into jniLibs by a single task and
-// stripped afterwards; a single writer keeps Gradle's output validation happy.
+//
+// Building them from source needs an x86_64 NDK, which Google does not publish for aarch64
+// hosts, so the default build reuses the committed .so files. Set OPENROOT_BUILD_NATIVE=1 to
+// compile them instead (ndk.dir in local.properties, or ANDROID_NDK_HOME / NDK_ROOT).
 // ---------------------------------------------------------------------------
+
+val buildNative: Boolean = System.getenv("OPENROOT_BUILD_NATIVE") == "1"
 
 /** NDK location: local.properties -> ANDROID_NDK_HOME -> NDK_ROOT -> D:/android-ndk-r27d. */
 fun resolveNdkDir(): String {
@@ -75,77 +80,94 @@ fun resolveNdkDir(): String {
         System.getenv("ANDROID_NDK_HOME"),
         System.getenv("NDK_ROOT"),
         "D:/android-ndk-r27d",
-    ).firstOrNull { !it.isNullOrBlank() }!!
+    ).firstOrNull { !it.isNullOrBlank() } ?: ""
 }
 
-val ndkDir: String = resolveNdkDir()
+val ndkDir: String = if (buildNative) {
+    resolveNdkDir().ifEmpty {
+        error(
+            "OPENROOT_BUILD_NATIVE=1 needs an NDK. Set ndk.dir in local.properties or " +
+                "ANDROID_NDK_HOME. Unset OPENROOT_BUILD_NATIVE to use the committed payloads."
+        )
+    }
+} else {
+    ""
+}
 val ndkPrebuilt: String = when {
     System.getProperty("os.name").lowercase().contains("win") -> "windows-x86_64"
     System.getProperty("os.name").lowercase().contains("mac") -> "darwin-x86_64"
     else -> "linux-x86_64"
 }
-val ndkBinDir: File = File(ndkDir, "toolchains/llvm/prebuilt/$ndkPrebuilt/bin")
-val ndkMake: String = File(ndkDir, "prebuilt/$ndkPrebuilt/bin/${if (ndkPrebuilt == "windows-x86_64") "make.exe" else "make"}").absolutePath
-val ndkStrip: String = File(ndkBinDir, if (ndkPrebuilt == "windows-x86_64") "llvm-strip.exe" else "llvm-strip").absolutePath
+val ndkBinDir: String = "$ndkDir/toolchains/llvm/prebuilt/$ndkPrebuilt/bin"
+val ndkMake: String = "$ndkDir/prebuilt/$ndkPrebuilt/bin/${if (ndkPrebuilt == "windows-x86_64") "make.exe" else "make"}"
+val ndkStrip: String = "$ndkBinDir/${if (ndkPrebuilt == "windows-x86_64") "llvm-strip.exe" else "llvm-strip"}"
 
 val jniLibsDir = layout.projectDirectory.dir("src/main/jniLibs/arm64-v8a")
 
 val buildNativeExploit = tasks.register<Exec>("buildNativeExploit") {
     group = "build"
     description = "Compiles the arm64 kernel-profile payload with the NDK"
+    enabled = buildNative
     workingDir = rootProject.layout.projectDirectory.dir("native").asFile
     commandLine(ndkMake, "ghostlock", "-j4")
     environment("NDK_ROOT", ndkDir)
     inputs.dir(rootProject.layout.projectDirectory.dir("native/core"))
     inputs.file(rootProject.layout.projectDirectory.file("native/Makefile"))
-    outputs.file(rootProject.layout.buildDirectory.file("native/ghostlock"))
+    outputs.file(layout.buildDirectory.file("native/ghostlock"))
 }
 
 val buildNativePageCache = tasks.register<Exec>("buildNativePageCache") {
     group = "build"
     description = "Compiles the arm64 page cache payload with the NDK"
+    enabled = buildNative
     workingDir = rootProject.layout.projectDirectory.dir("native-or").asFile
     commandLine(ndkMake, "payload", "-j4")
     environment("NDK_ROOT", ndkDir)
     inputs.dir(rootProject.layout.projectDirectory.dir("native-or"))
-    outputs.dir(rootProject.layout.buildDirectory.dir("or"))
+    outputs.dir(layout.buildDirectory.dir("or"))
 }
 
 val buildNativeGpu = tasks.register<Exec>("buildNativeGpu") {
     group = "build"
     description = "Compiles the arm64 Adreno GPU payloads with the NDK"
+    enabled = buildNative
     workingDir = rootProject.layout.projectDirectory.dir("native-gpu").asFile
     commandLine(ndkMake, "payload", "-j4")
     environment("NDK_ROOT", ndkDir)
     inputs.dir(rootProject.layout.projectDirectory.dir("native-gpu"))
-    outputs.dir(rootProject.layout.buildDirectory.dir("gpu"))
+    outputs.dir(layout.buildDirectory.dir("gpu"))
 }
 
 val buildNativePct = tasks.register<Exec>("buildNativePct") {
     group = "build"
     description = "Compiles the arm64 posix-cpu-timers payload with the NDK"
+    enabled = buildNative
     workingDir = rootProject.layout.projectDirectory.dir("native-pct").asFile
     commandLine(ndkMake, "payload", "-j4")
     environment("NDK_ROOT", ndkDir)
     inputs.dir(rootProject.layout.projectDirectory.dir("native-pct"))
-    outputs.dir(rootProject.layout.buildDirectory.dir("pct"))
+    outputs.dir(layout.buildDirectory.dir("pct"))
 }
 
-/** The only task that writes into jniLibs. */
+/**
+ * The only task that writes into jniLibs. When the payloads are prebuilt this does nothing, so
+ * the committed .so files are packaged exactly as they were released.
+ */
 val prepareNativePayloads = tasks.register<Copy>("prepareNativePayloads") {
     group = "build"
-    description = "Copies every payload into jniLibs"
+    description = "Copies every compiled payload into jniLibs"
+    enabled = buildNative
     dependsOn(buildNativeExploit, buildNativePageCache, buildNativeGpu, buildNativePct)
-    from(rootProject.layout.buildDirectory.file("native/ghostlock")) {
+    from(layout.buildDirectory.file("native/ghostlock")) {
         rename { "libghostlock.so" }
     }
-    from(rootProject.layout.buildDirectory.dir("or")) {
+    from(layout.buildDirectory.dir("or")) {
         include("libopenroot.so", "libopenbootstrap.so")
     }
-    from(rootProject.layout.buildDirectory.dir("gpu")) {
+    from(layout.buildDirectory.dir("gpu")) {
         include("libcheese-quest.so", "libcheese-snapdragon.so")
     }
-    from(rootProject.layout.buildDirectory.dir("pct")) {
+    from(layout.buildDirectory.dir("pct")) {
         include("libpct-opace6.so")
     }
     into(jniLibsDir)
@@ -154,6 +176,7 @@ val prepareNativePayloads = tasks.register<Copy>("prepareNativePayloads") {
 val stripNativePayloads = tasks.register<Exec>("stripNativePayloads") {
     group = "build"
     description = "Strips the packaged payloads"
+    enabled = buildNative
     dependsOn(prepareNativePayloads)
     val targets = listOf(
         "libghostlock.so",
@@ -196,6 +219,11 @@ dependencies {
     implementation(libs.bouncycastle.pkix)
     // TLSv1.3 exportKeyingMaterial without relying on hidden APIs
     implementation(libs.conscrypt.android)
+
+    // Shell transport that needs neither wireless debugging nor a computer: Shizuku hands the
+    // app a process running as shell (uid 2000), which is exactly what the payloads expect.
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)

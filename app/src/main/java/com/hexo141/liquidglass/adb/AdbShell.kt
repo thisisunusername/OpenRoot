@@ -33,7 +33,7 @@ object AdbShell {
                 val read = try {
                     stream.read(buffer, 0, buffer.size)
                 } catch (e: IOException) {
-                    if (stream.isClosed) break else throw e
+                    if (stream.isClosed()) break else throw e
                 }
                 watchdog.touch()
                 if (read <= 0) break
@@ -71,7 +71,7 @@ object AdbShell {
                 val read = try {
                     stream.read(buffer, 0, buffer.size)
                 } catch (e: IOException) {
-                    if (stream.isClosed) break else throw e
+                    if (stream.isClosed()) break else throw e
                 }
                 watchdog.touch()
                 if (read <= 0) break

@@ -1,5 +1,7 @@
 package com.hexo141.liquidglass.root
 
+import java.io.File
+
 import com.hexo141.liquidglass.adb.AbsAdbConnectionManager
 import com.hexo141.liquidglass.adb.AdbShell
 
@@ -29,9 +31,10 @@ object RootShell {
         command: String,
         timeoutMs: Long = 60_000,
         onLine: (String) -> Unit = {},
+        cacheDirectory: File? = null,
     ): String {
         AdbShell.exec(manager, "rm -f $CMD $OUT $DONE")
-        AdbShell.push(manager, CMD, command.toByteArray())
+        AdbShell.stage(manager, CMD, command.toByteArray(), cacheDirectory, "stage-cmd.sh")
 
         val full = StringBuilder()
         val pending = StringBuilder()

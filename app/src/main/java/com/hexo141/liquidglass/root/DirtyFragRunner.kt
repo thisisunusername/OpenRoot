@@ -198,8 +198,17 @@ object DirtyFragRunner {
 
         onLine("$ mkdir -p $STAGE_DIR")
         AdbShell.exec(manager, "mkdir -p $STAGE_DIR")
-        onLine("$ cat > $STAGE_DIR/$BOOTSTRAP_REMOTE")
-        AdbShell.push(manager, "$STAGE_DIR/$BOOTSTRAP_REMOTE", bootstrap.readBytes())
+        // The bytes land in this app's external cache first, so the shell only copies a file it
+        // can already read; a stdin `cat >` arrives empty on the Shizuku transport.
+        val relayDir = context.getExternalCacheDir()
+        AdbShell.stage(
+            manager,
+            "$STAGE_DIR/$BOOTSTRAP_REMOTE",
+            bootstrap.readBytes(),
+            relayDir,
+            "stage-bootstrap.bin",
+            onLine,
+        )
         onProgress(0.2f)
         onLine("$ chmod 755 $STAGE_DIR/$BOOTSTRAP_REMOTE")
         AdbShell.exec(manager, "chmod 755 $STAGE_DIR/$BOOTSTRAP_REMOTE")
@@ -214,14 +223,19 @@ object DirtyFragRunner {
                 <boolean name="disable_modules" value="false" />
             </map>
         """.trimIndent().toByteArray()
-        onLine("$ cat > $STAGE_DIR/openroot.xml")
-        AdbShell.push(manager, "$STAGE_DIR/openroot.xml", prefs)
+        AdbShell.stage(
+            manager,
+            "$STAGE_DIR/openroot.xml",
+            prefs,
+            relayDir,
+            "stage-prefs.xml",
+            onLine,
+        )
         onProgress(0.3f)
         AdbShell.exec(manager, "chmod 644 $STAGE_DIR/openroot.xml")
 
-        // libksud.so lives in the manager's native library dir. Prefer `dd` on the device, which
-        // toybox ships even when `cp` is unusable; pushing the bytes is the fallback because a
-        // multi-megabyte pipe transfer can still end in EPIPE.
+        // libksud.so lives in the manager's native library dir, which the shell user cannot read.
+        // This app can, so the bytes go into its external cache and the shell copies that file.
         if (mode == Mode.KERNEL_SU && suManager != null) {
             val alreadyStaged = AdbShell.exec(
                 manager,
@@ -231,28 +245,20 @@ object DirtyFragRunner {
                 onLine("$ test -x $STAGE_DIR/ksud    # already staged, skipping")
                 onProgress(0.38f)
             } else {
-                onLine("$ dd if=${suManager.ksudPath} of=$STAGE_DIR/ksud")
-                AdbShell.exec(
-                    manager,
-                    "rm -f $STAGE_DIR/ksud; " +
-                        "dd if='${suManager.ksudPath}' of=$STAGE_DIR/ksud 2>&1; " +
-                        "chmod 755 $STAGE_DIR/ksud",
-                    timeoutMs = 120_000,
-                )
-                val copied = AdbShell.exec(
-                    manager,
-                    "test -s $STAGE_DIR/ksud && test -x $STAGE_DIR/ksud && echo ok",
-                ).contains("ok")
-                if (!copied) {
-                    val ksudBytes = KsuManager.readKsud(suManager.ksudPath)
-                    if (ksudBytes == null) {
-                        onLine("<e> cannot read ${suManager.ksudPath} from this app")
-                    } else {
-                        onLine("$ cat > $STAGE_DIR/ksud    # ${ksudBytes.size} bytes")
-                        AdbShell.push(manager, "$STAGE_DIR/ksud", ksudBytes)
-                        onLine("$ chmod 755 $STAGE_DIR/ksud")
-                        AdbShell.exec(manager, "chmod 755 $STAGE_DIR/ksud")
-                    }
+                val ksudBytes = KsuManager.readKsud(suManager.ksudPath)
+                if (ksudBytes == null) {
+                    onLine("<e> cannot read ${suManager.ksudPath} from this app")
+                } else {
+                    AdbShell.stage(
+                        manager,
+                        "$STAGE_DIR/ksud",
+                        ksudBytes,
+                        relayDir,
+                        "stage-ksud.bin",
+                        onLine,
+                    )
+                    onLine("$ chmod 755 $STAGE_DIR/ksud")
+                    AdbShell.exec(manager, "chmod 755 $STAGE_DIR/ksud")
                 }
                 onProgress(0.38f)
                 val staged = AdbShell.exec(

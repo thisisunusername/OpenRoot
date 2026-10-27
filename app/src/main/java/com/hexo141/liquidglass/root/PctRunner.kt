@@ -132,29 +132,34 @@ object PctRunner {
         AdbShell.exec(manager, "chmod 644 $STAGE_DIR/openroot.xml")
 
         if (suManager != null) {
-            // Reuse an already staged ksud: /data/local/tmp survives reinstalls, and the copy is
-            // the step that fails when the process cannot read the manager's native lib dir.
+            // Push the bytes instead of running `cp` on the device: some ROMs have no usable `cp`
+            // for the shell user, and a Shizuku pipe can drop the confirmation even when the copy
+            // works. `cat > path` plus a built-in chmod needs no external command.
             val alreadyStaged = AdbShell.exec(
                 manager,
-                "test -x $STAGE_DIR/ksud && echo ok",
+                "test -s $STAGE_DIR/ksud && test -x $STAGE_DIR/ksud && echo ok",
             ).contains("ok")
 
             if (alreadyStaged) {
                 onLine("$ test -x $STAGE_DIR/ksud    # already staged, skipping")
                 onProgress(0.32f)
             } else {
-                onLine("$ cp ${suManager.ksudPath} $STAGE_DIR/ksud")
-                val copy = AdbShell.exec(
-                    manager,
-                    "cp '${suManager.ksudPath}' $STAGE_DIR/ksud && chmod 755 $STAGE_DIR/ksud && echo ok",
-                )
+                val ksudBytes = KsuManager.readKsud(suManager.ksudPath)
+                if (ksudBytes == null) {
+                    onLine("<e> cannot read ${suManager.ksudPath} from this app")
+                    throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")
+                }
+                onLine("$ cat > $STAGE_DIR/ksud    # ${ksudBytes.size} bytes")
+                AdbShell.push(manager, "$STAGE_DIR/ksud", ksudBytes)
+                onLine("$ chmod 755 $STAGE_DIR/ksud")
+                AdbShell.exec(manager, "chmod 755 $STAGE_DIR/ksud")
                 onProgress(0.32f)
-                // Same reason as GpuRunner: `echo ok` can be swallowed by a pipe even though the
-                // copy worked, so confirm against the filesystem too.
-                val staged = copy.contains("ok") ||
-                    AdbShell.exec(manager, "test -x $STAGE_DIR/ksud && echo ok").contains("ok")
+
+                val staged = AdbShell.exec(
+                    manager,
+                    "test -x $STAGE_DIR/ksud && echo ok",
+                ).contains("ok")
                 if (!staged) {
-                    onLine(copy.trim())
                     throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")
                 }
             }

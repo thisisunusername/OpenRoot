@@ -113,6 +113,23 @@ object KsuManager {
         return if (ksud.isFile) ksud.absolutePath else null
     }
 
+    /**
+     * Reads the manager's `libksud.so` *as this app*, not as the shell user.
+     *
+     * Staging ksud by running `cp` on the device is fragile: some ROMs refuse the copy outright
+     * (`/system/bin/sh: shell:cp: inaccessible or not found`), and a Shizuku pipe can swallow the
+     * result even when the copy works. The app already holds the bytes by virtue of the path
+     * [resolve] handed out, so the caller can push them over the same channel it uses for every
+     * other staged file - `cat > path` - which needs no external command at all.
+     *
+     * @return the file contents, or null when the manager's library cannot be read after all
+     */
+    fun readKsud(path: String): ByteArray? = runCatching {
+        val file = File(path)
+        if (!file.isFile) return null
+        file.readBytes()
+    }.onFailure { Log.w(TAG, "cannot read ksud at $path", it) }.getOrNull()
+
     /** Why the manager could not be brought to the foreground. */
     enum class LaunchResult { OK, NO_PACKAGE, NO_INTENT, FAILED }
 

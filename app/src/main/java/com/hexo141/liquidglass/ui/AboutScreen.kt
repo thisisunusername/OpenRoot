@@ -165,6 +165,7 @@ fun AboutScreen(
             Spacer(Modifier.height(10.dp))
             listOf(
                 "Wireless ADB pairing, no cable and no PC.",
+                "Or Shizuku: no pairing code at all, just grant access.",
                 "Runs a temporary root payload on supported kernels."
             ).forEach { line ->
                 BasicText(
@@ -358,15 +359,18 @@ private fun installedVersionName(context: Context): String =
 private data class AppUpdate(val version: String, val url: String)
 
 /**
- * Latest release of `hexo141/OpenRoot`, from `GET /repos/hexo141/OpenRoot/releases/latest`.
+ * Latest release of this fork, from `GET /repos/thisisunusername/OpenRoot/releases/latest`.
  *
  * Gradle stamps the APK with the build date and CI publishes the same date as the tag, so a
  * numeric tag comparison is an exact update test. The answer is cached for a few minutes, and a
  * failed request simply hides the badge until the next check.
+ *
+ * Pointing this at upstream would be wrong: this build carries the Shizuku transport, which
+ * upstream does not, so every upstream release would look like a downgrade-free update.
  */
 private object UpdateChecker {
     private const val LATEST_RELEASE_URL =
-        "https://api.github.com/repos/hexo141/OpenRoot/releases/latest"
+        "https://api.github.com/repos/thisisunusername/OpenRoot/releases/latest"
     private const val CHECK_INTERVAL_MS = 10 * 60 * 1000L
 
     @Volatile
@@ -525,6 +529,6 @@ private val aboutShadow = Shadow(
     blurRadius = 6f
 )
 
-private const val ABOUT_URL = "https://github.com/hexo141/OpenRoot"
+private const val ABOUT_URL = "https://github.com/thisisunusername/OpenRoot"
 private const val CONTRIBUTORS_URL =
-    "https://api.github.com/repos/hexo141/OpenRoot/contributors?per_page=100"
+    "https://api.github.com/repos/thisisunusername/OpenRoot/contributors?per_page=100"

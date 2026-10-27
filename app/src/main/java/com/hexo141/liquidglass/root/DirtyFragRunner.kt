@@ -219,21 +219,32 @@ object DirtyFragRunner {
         onProgress(0.3f)
         AdbShell.exec(manager, "chmod 644 $STAGE_DIR/openroot.xml")
 
-        // libksud.so lives in the manager's native library dir, which the shell user can read.
+        // libksud.so lives in the manager's native library dir, which a shell-uid process cannot
+        // always read. A ksud left behind by an earlier run is reused as-is.
         if (mode == Mode.KERNEL_SU && suManager != null) {
-            onLine("$ cp ${suManager.ksudPath} $STAGE_DIR/ksud")
-            val copy = AdbShell.exec(
+            val alreadyStaged = AdbShell.exec(
                 manager,
-                "cp '${suManager.ksudPath}' $STAGE_DIR/ksud && chmod 755 $STAGE_DIR/ksud && echo ok",
-            )
-            onProgress(0.38f)
-            if (!copy.contains("ok")) {
-                Log.w(TAG, "staging ksud failed: $copy")
-                onLine(copy.trim())
+                "test -x $STAGE_DIR/ksud && echo ok",
+            ).contains("ok")
+            if (alreadyStaged) {
+                onLine("$ test -x $STAGE_DIR/ksud    # already staged, skipping")
+                onProgress(0.38f)
             } else {
-
+                onLine("$ cp ${suManager.ksudPath} $STAGE_DIR/ksud")
+                val copy = AdbShell.exec(
+                    manager,
+                    "cp '${suManager.ksudPath}' $STAGE_DIR/ksud && chmod 755 $STAGE_DIR/ksud && echo ok",
+                )
+                onProgress(0.38f)
+                // `echo ok` may be swallowed by a pipe even though the copy worked, so confirm
+                // against the filesystem before calling the stage a failure.
+                val staged = copy.contains("ok") ||
+                    AdbShell.exec(manager, "test -x $STAGE_DIR/ksud && echo ok").contains("ok")
+                if (!staged) {
+                    Log.w(TAG, "staging ksud failed: $copy")
+                    onLine(copy.trim())
+                }
             }
         }
-
     }
 }

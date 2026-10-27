@@ -104,13 +104,13 @@ object AdbShell {
         }
         return exitCode
     }
-
     /**
      * Writes [bytes] to [remotePath] through the daemon's shell.
      *
-     * The stream is an unacknowledged pipe on the Shizuku transport, so a chunk can be refused
-     * with `EPIPE` while `cat` is still busy. Rather than fail the whole stage, reopen the pipe in
-     * append mode and continue from the offset reached so far; [PUSH_ATTEMPTS] bounds the retries.
+     * Finishing the write is not the same as finishing the file: `cat` only moves its buffer to
+     * disk once it sees the end of its input, so the channel's stdin is closed first and the child
+     * is given time to exit. Killing the channel straight after the last byte used to leave every
+     * pushed file at 0 bytes on the Shizuku transport.
      */
     @Throws(Exception::class)
     fun push(manager: AbsAdbConnectionManager, remotePath: String, bytes: ByteArray) {
@@ -128,6 +128,7 @@ object AdbShell {
                     offset += length
                 }
                 stream.flush()
+                stream.closeInput()
             } catch (e: IOException) {
                 // The pipe broke mid-chunk: the bytes from the failed write may be half there, so
                 // resume from the last confirmed offset and let `>>` append the rest.

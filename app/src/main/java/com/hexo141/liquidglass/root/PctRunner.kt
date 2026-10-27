@@ -132,19 +132,31 @@ object PctRunner {
         AdbShell.exec(manager, "chmod 644 $STAGE_DIR/openroot.xml")
 
         if (suManager != null) {
-            onLine("$ cp ${suManager.ksudPath} $STAGE_DIR/ksud")
-            val copy = AdbShell.exec(
+            // Reuse an already staged ksud: /data/local/tmp survives reinstalls, and the copy is
+            // the step that fails when the process cannot read the manager's native lib dir.
+            val alreadyStaged = AdbShell.exec(
                 manager,
-                "cp '${suManager.ksudPath}' $STAGE_DIR/ksud && chmod 755 $STAGE_DIR/ksud && echo ok",
-            )
-            onProgress(0.32f)
-            // Same reason as GpuRunner: `echo ok` can be swallowed by a pipe even though the copy
-            // worked, so confirm against the filesystem too.
-            val staged = copy.contains("ok") ||
-                AdbShell.exec(manager, "test -x $STAGE_DIR/ksud && echo ok").contains("ok")
-            if (!staged) {
-                onLine(copy.trim())
-                throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")
+                "test -x $STAGE_DIR/ksud && echo ok",
+            ).contains("ok")
+
+            if (alreadyStaged) {
+                onLine("$ test -x $STAGE_DIR/ksud    # already staged, skipping")
+                onProgress(0.32f)
+            } else {
+                onLine("$ cp ${suManager.ksudPath} $STAGE_DIR/ksud")
+                val copy = AdbShell.exec(
+                    manager,
+                    "cp '${suManager.ksudPath}' $STAGE_DIR/ksud && chmod 755 $STAGE_DIR/ksud && echo ok",
+                )
+                onProgress(0.32f)
+                // Same reason as GpuRunner: `echo ok` can be swallowed by a pipe even though the
+                // copy worked, so confirm against the filesystem too.
+                val staged = copy.contains("ok") ||
+                    AdbShell.exec(manager, "test -x $STAGE_DIR/ksud && echo ok").contains("ok")
+                if (!staged) {
+                    onLine(copy.trim())
+                    throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")
+                }
             }
         }
 

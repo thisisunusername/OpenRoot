@@ -143,20 +143,35 @@ object GpuRunner {
         AdbShell.exec(manager, "chmod 644 $STAGE_DIR/openroot.xml")
 
         if (suManager != null) {
-            onLine("$ cp ${suManager.ksudPath} $STAGE_DIR/ksud")
-            val copy = AdbShell.exec(
+            // A previous run may have left a working ksud behind: /data/local/tmp survives app
+            // reinstalls, and staging it again is the step most likely to fail (a shell-uid
+            // process cannot always read the manager's native lib dir). If it is already there
+            // and executable, reuse it and skip the copy entirely.
+            val alreadyStaged = AdbShell.exec(
                 manager,
-                "cp '${suManager.ksudPath}' $STAGE_DIR/ksud && chmod 755 $STAGE_DIR/ksud && echo ok",
-            )
-            onProgress(0.46f)
-            // `echo ok` is the fast path, but a pipe can swallow it: on some OEM builds the copy
-            // succeeds and the confirmation never reaches us. Ask the filesystem instead of
-            // trusting the echo alone, otherwise a perfectly good stage looks like a failure.
-            val staged = copy.contains("ok") ||
-                AdbShell.exec(manager, "test -x $STAGE_DIR/ksud && echo ok").contains("ok")
-            if (!staged) {
-                onLine(copy.trim())
-                throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")
+                "test -x $STAGE_DIR/ksud && echo ok",
+            ).contains("ok")
+
+            if (alreadyStaged) {
+                onLine("$ test -x $STAGE_DIR/ksud    # already staged, skipping")
+                onProgress(0.46f)
+            } else {
+                onLine("$ cp ${suManager.ksudPath} $STAGE_DIR/ksud")
+                val copy = AdbShell.exec(
+                    manager,
+                    "cp '${suManager.ksudPath}' $STAGE_DIR/ksud && chmod 755 $STAGE_DIR/ksud && echo ok",
+                )
+                onProgress(0.46f)
+                // `echo ok` is the fast path, but a pipe can swallow it: on some OEM builds the
+                // copy succeeds and the confirmation never reaches us. Ask the filesystem instead
+                // of trusting the echo alone, otherwise a perfectly good stage looks like a
+                // failure.
+                val staged = copy.contains("ok") ||
+                    AdbShell.exec(manager, "test -x $STAGE_DIR/ksud && echo ok").contains("ok")
+                if (!staged) {
+                    onLine(copy.trim())
+                    throw IllegalStateException("Cannot stage ksud (${suManager.ksudPath})")
+                }
             }
         }
 

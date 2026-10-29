@@ -9,6 +9,7 @@ import android.os.Parcel
 import android.os.RemoteException
 import android.util.Log
 import rikka.shizuku.Shizuku
+import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.ShizukuRemoteProcess
 import java.io.IOException
 
@@ -191,26 +192,26 @@ object ShizukuShell {
     ): ShizukuRemoteProcess {
         val binder = Shizuku.getBinder()
             ?: throw IOException("Shizuku is not running; start it and grant this app access")
+        // `Shizuku.getBinder()` is the local proxy for the service, not the service itself: a
+        // transaction sent to it directly is answered by nobody and simply returns false, which is
+        // what "Shizuku refused to start a process" used to mean. Wrapping it makes every
+        // transaction travel to the server process, which is where `newProcess` actually lives.
+        val service = ShizukuBinderWrapper(binder)
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
         try {
-            data.writeInterfaceToken(SHIZUKU_DESCRIPTOR)
+            // The wrapper writes the interface token and the transaction code itself, so `data`
+            // carries only the AIDL arguments.
             data.writeStringArray(cmd)
             data.writeStringArray(env)
             data.writeString(dir)
-            // The client binder goes last so the server can kill the child when this app dies; that
-            // is what keeps a stray `sh` from outliving the Activity that started it.
-            data.writeStrongBinder(null)
 
-            if (!binder.transact(TRANSACTION_NEW_PROCESS, data, reply, 0)) {
+            if (!service.transact(TRANSACTION_NEW_PROCESS, data, reply, 0)) {
                 throw RemoteException("Shizuku rejected newProcess")
             }
             reply.readException()
             val remote = reply.readStrongBinder()
                 ?: throw RemoteException("Shizuku returned no process for ${cmd.joinToString(" ")}")
-            // AIDL writes the interface token of the returned binder; unread, the recycle below
-            // would find the parcel in an inconsistent state.
-            reply.readString()
             return wrap(remote)
         } finally {
             reply.recycle()
@@ -236,9 +237,6 @@ object ShizukuShell {
             parcel.recycle()
         }
     }
-
-    /** Descriptor the Shizuku service checks before dispatching a transaction. */
-    private const val SHIZUKU_DESCRIPTOR = "moe.shizuku.server.IShizukuService"
 
     /** `IRemoteProcess newProcess(in String[] cmd, in String[] env, in String dir) = 7`. */
     private const val TRANSACTION_NEW_PROCESS = 7

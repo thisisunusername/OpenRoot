@@ -4,8 +4,12 @@ package com.hexo141.liquidglass.adb
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.IBinder
+import android.os.Parcel
+import android.os.RemoteException
 import android.util.Log
 import rikka.shizuku.Shizuku
+import rikka.shizuku.ShizukuRemoteProcess
 import java.io.IOException
 
 /**
@@ -152,20 +156,92 @@ object ShizukuShell {
         }
 
         val process = try {
-            @Suppress("DEPRECATION")
-            Shizuku.newProcess(arrayOf("/system/bin/sh", "-c", command), null, ENV)
+            startProcess(arrayOf("/system/bin/sh", "-c", command))
+        } catch (e: RemoteException) {
+            throw IOException("Shizuku refused to start a process", e)
         } catch (e: IllegalStateException) {
             throw IOException("Shizuku binder is gone", e)
         } catch (e: RuntimeException) {
             throw IOException("Shizuku could not start the process", e)
         }
 
-        if (process == null) {
-            throw IOException("Shizuku returned no process for $command")
-        }
         Log.d(TAG, "started (${describePrivilege()}): $command")
         return ShizukuStream(process, command)
     }
+
+    /**
+     * Asks the Shizuku server to fork a process, then wraps the returned binder.
+     *
+     * `Shizuku.newProcess` was public until API 13 and private afterwards, so it cannot be called
+     * from here any more. The service call it used is still there - `IShizukuService.newProcess`
+     * with transaction code [TRANSACTION_NEW_PROCESS] - so this talks to that directly.
+     *
+     * The reply parcel holds a binder (the `IRemoteProcess`) followed by its AIDL interface token;
+     * both are read here so the parcel is left in a consistent state before it is recycled.
+     *
+     * @param cmd argv, `cmd[0]` an absolute path
+     * @param env the child's whole environment; Android's `sh` adds its own PATH when this is null
+     * @param dir working directory, or null to inherit the server's
+     */
+    @Throws(RemoteException::class)
+    private fun startProcess(
+        cmd: Array<String>,
+        env: Array<String>? = ENV,
+        dir: String? = null,
+    ): ShizukuRemoteProcess {
+        val binder = Shizuku.getBinder()
+            ?: throw IOException("Shizuku is not running; start it and grant this app access")
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        try {
+            data.writeInterfaceToken(SHIZUKU_DESCRIPTOR)
+            data.writeStringArray(cmd)
+            data.writeStringArray(env)
+            data.writeString(dir)
+            // The client binder goes last so the server can kill the child when this app dies; that
+            // is what keeps a stray `sh` from outliving the Activity that started it.
+            data.writeStrongBinder(null)
+
+            if (!binder.transact(TRANSACTION_NEW_PROCESS, data, reply, 0)) {
+                throw RemoteException("Shizuku rejected newProcess")
+            }
+            reply.readException()
+            val remote = reply.readStrongBinder()
+                ?: throw RemoteException("Shizuku returned no process for ${cmd.joinToString(" ")}")
+            // AIDL writes the interface token of the returned binder; unread, the recycle below
+            // would find the parcel in an inconsistent state.
+            reply.readString()
+            return wrap(remote)
+        } finally {
+            reply.recycle()
+            data.recycle()
+        }
+    }
+
+    /**
+     * Rebuilds a [ShizukuRemoteProcess] around an `IRemoteProcess` binder.
+     *
+     * Its constructor takes an `IRemoteProcess` and is package private inside `rikka.shizuku`, so
+     * this app cannot call it. The `Parcelable` half of the class is public, though, and its
+     * `CREATOR` reads exactly one binder back out - so a throwaway parcel gets there without
+     * reflection, which would break under an obfuscated or shrunk Shizuku build.
+     */
+    private fun wrap(binder: IBinder): ShizukuRemoteProcess {
+        val parcel = Parcel.obtain()
+        try {
+            parcel.writeStrongBinder(binder)
+            parcel.setDataPosition(0)
+            return ShizukuRemoteProcess.CREATOR.createFromParcel(parcel)
+        } finally {
+            parcel.recycle()
+        }
+    }
+
+    /** Descriptor the Shizuku service checks before dispatching a transaction. */
+    private const val SHIZUKU_DESCRIPTOR = "moe.shizuku.server.IShizukuService"
+
+    /** `IRemoteProcess newProcess(in String[] cmd, in String[] env, in String dir) = 7`. */
+    private const val TRANSACTION_NEW_PROCESS = 7
 
     /**
      * Drops the ADB service prefix the callers use, so `shell:ls -l /tmp` becomes `ls -l /tmp`.

@@ -91,9 +91,66 @@ class AdbConnectionManager private constructor(private val context: Context) : A
             // routing every command into the server that just failed its probe.
             useShizuku(false)
         }
-        val ok = connectTls(context, timeoutMillis)
+        val saved = PairingState(context).manualEndpoint
+        val ok = if (saved != null) {
+            // A saved manual address beats discovery: it was typed because discovery found nothing,
+            // and searching again would wait out the whole timeout before failing the same way.
+            runCatching { connectManual(context, saved) }.getOrElse {
+                Log.w(TAG, "manual endpoint $saved failed, trying discovery", it)
+                connectTls(context, timeoutMillis)
+            }
+        } else {
+            connectTls(context, timeoutMillis)
+        }
         if (ok) transport = Transport.ADB
         return ok
+    }
+
+    /**
+     * Connects straight to an ADB endpoint the user typed in.
+     *
+     * Discovery through mDNS is the only route this code had, and it does not exist on a device
+     * whose settings carry no wireless-debugging entry, nor on one where `adb tcpip` was used
+     * instead. A host and a port need no discovery at all: `127.0.0.1:5555` is the daemon on the
+     * same device, and any other address is that device reachable over the network.
+     *
+     * Shizuku is deliberately not consulted. Asking for a manual address is a statement that the
+     * user wants this transport, so probing and falling back would ignore the request.
+     *
+     * @param endpoint either `host:port`, or a bare port meaning `127.0.0.1:<port>`
+     */
+    @Throws(IOException::class, InterruptedException::class, AdbPairingRequiredException::class)
+    fun connectManual(context: Context, endpoint: String): Boolean {
+        val (host, port) = parseEndpoint(endpoint)
+            ?: throw IOException("'$endpoint' is not host:port")
+        setLocalShell(null)
+        transport = Transport.NONE
+        val ok = connect(host, port)
+        if (ok) {
+            transport = Transport.ADB
+            // Remember the address so a later reconnect and the status line agree with it.
+            PairingState(context).manualEndpoint = "$host:$port"
+        }
+        return ok
+    }
+
+    /** Splits `host:port`, or a bare port, which the local daemon uses. */
+    private fun parseEndpoint(endpoint: String): Pair<String, Int>? {
+        val trimmed = endpoint.trim().removePrefix("adb://").removeSuffix("/")
+        if (trimmed.isEmpty()) return null
+        val colon = trimmed.lastIndexOf(':')
+        val host: String
+        val portText: String
+        if (colon < 0) {
+            host = "127.0.0.1"
+            portText = trimmed
+        } else {
+            host = trimmed.substring(0, colon).ifEmpty { "127.0.0.1" }
+            portText = trimmed.substring(colon + 1)
+        }
+        val port = portText.toIntOrNull() ?: return null
+        if (port !in 1..65535) return null
+        return host to port
     }
 
     companion object {

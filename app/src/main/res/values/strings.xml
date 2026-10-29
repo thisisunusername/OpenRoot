@@ -47,6 +47,9 @@
     <string name="shizuku_permission_denied">Shizuku access was denied. Re-enable it in Shizuku\'s app list.</string>
     <string name="shizuku_ready">Shizuku ready</string>
     <string name="shizuku_unusable">Shizuku is granted but cannot run commands. Pair over wireless debugging instead.</string>
+    <string name="adb_manual_hint">host:port</string>
+    <string name="adb_manual_connect">Connect</string>
+    <string name="adb_manual_failed">Could not connect to %1$s</string>
     <string name="shizuku_grant">Grant Shizuku access</string>
     <string name="shizuku_privilege">Privilege: %1$s</string>
 

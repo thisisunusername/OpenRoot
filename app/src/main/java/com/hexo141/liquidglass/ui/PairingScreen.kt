@@ -1,10 +1,11 @@
 package com.hexo141.liquidglass.ui
 
-import android.os.Build
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,30 +13,33 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.key
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.graphics.drawscope.withTransform
-import androidx.compose.ui.graphics.vector.PathParser
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -76,6 +80,10 @@ fun PairingScreen(
     exploitChoices: List<ExploitChoice>,
     pickerVisible: Boolean,
     backdrop: Backdrop,
+    /** Endpoint the user typed in, or `null` when the manual field has never been used. */
+    manualEndpoint: String?,
+    /** Connect straight to [name], skipping mDNS discovery entirely. */
+    onManualConnect: (String) -> Unit,
     onToggle: () -> Unit,
     onExploit: () -> Unit,
     onPickEngine: (String) -> Unit,
@@ -284,6 +292,17 @@ fun PairingScreen(
                     )
                 )
             }
+            // Manual endpoint: discovery through mDNS is the only automatic route, and it finds
+            // nothing on a device whose settings carry no wireless-debugging entry. Typing
+            // `127.0.0.1:5555` connects to the daemon on this device without any discovery.
+            if (!connected) {
+                ManualEndpointField(
+                    saved = manualEndpoint,
+                    backdrop = backdrop,
+                    surfaceColor = glassSurfaceColor,
+                    onConnect = onManualConnect,
+                )
+            }
         }
 
         EnginePicker(
@@ -312,6 +331,75 @@ private fun buttonTextStyle() = TextStyle(
 
 /** Accent colour of the Exploit button. */
 private val ExploitBlue = Color(0xFF0A84FF)
+
+/**
+ * Accepts a `host:port` and connects to it directly.
+ *
+ * The automatic route is mDNS discovery of a wireless-debugging service, which does not exist on
+ * every device: some builds carry no wireless-debugging entry at all, and others reach `adbd`
+ * through `adb tcpip` instead. A typed address needs neither. `127.0.0.1:5555` targets the daemon
+ * on this device, and a bare port means the same host.
+ */
+@Composable
+private fun ManualEndpointField(
+    saved: String?,
+    backdrop: Backdrop,
+    surfaceColor: Color,
+    onConnect: (String) -> Unit,
+) {
+    // Pre-fill with the last address that worked, and with the usual local daemon port otherwise,
+    // so the common case is one tap instead of typing.
+    var text by remember(saved) { mutableStateOf(saved ?: "127.0.0.1:5555") }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(46.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.Black.copy(alpha = 0.35f))
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            BasicTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                textStyle = TextStyle(color = Color.White, fontSize = 14.sp),
+                cursorBrush = SolidColor(Color.White),
+                modifier = Modifier.fillMaxWidth(),
+                decorationBox = { inner ->
+                    if (text.isEmpty()) {
+                        BasicText(
+                            text = stringResource(R.string.adb_manual_hint),
+                            style = TextStyle(
+                                color = Color.White.copy(alpha = 0.5f),
+                                fontSize = 14.sp,
+                            ),
+                        )
+                    }
+                    inner()
+                },
+            )
+        }
+        LiquidGlassButton(
+            onClick = { onConnect(text) },
+            backdrop = backdrop,
+            surfaceColor = surfaceColor,
+            height = 46.dp,
+            horizontalPadding = 16.dp,
+        ) {
+            BasicText(
+                text = stringResource(R.string.adb_manual_connect),
+                style = buttonTextStyle(),
+            )
+        }
+    }
+}
 
 /** Repository link shown next to the title. */
 private const val PROJECT_URL = "https://github.com/thisisunusername/OpenRoot"

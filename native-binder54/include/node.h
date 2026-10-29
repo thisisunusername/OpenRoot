@@ -45,4 +45,8 @@ static struct exp_node *_node_create(uint8_t *endpoint_name, int target_fd);
 void node_destroy(struct exp_node *node);
 bool node_leak(struct exp_node *node, uint64_t *A, uint64_t *B);
 bool node_leak_addr_and_kbase(struct exp_node *node, uint64_t *text);
+// Defined in node.c and called from exploit.c. Both take and return pointers, so an implicit
+// declaration would have truncated them on arm64.
+bool node_realloc_epitem(struct exp_node *node, int fd);
+bool node_kaddr_disclose(struct exp_node *node1, struct exp_node *node2);
 #endif /*! NODE_H_ */

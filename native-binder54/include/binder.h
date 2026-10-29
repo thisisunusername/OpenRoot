@@ -120,5 +120,6 @@ void binder_free_buffers(struct binder_state *bs, binder_uintptr_t buffer_to_fre
 uint32_t binder_read_next(struct binder_state *bs, void *data, uint32_t *remaining, uint32_t *consumed);
 void binder_send_reply(struct binder_state *bs, struct binder_io *reply, binder_uintptr_t buffer_to_free, int status);
 void bio_init_from_txn(struct binder_io *bio, struct binder_transaction_data *txn);
+void *make_transaction(void *buffer, bool one_way, uint32_t handle, void *opaque, size_t opaque_size, void *offsets, size_t offsets_size);
 
 #endif

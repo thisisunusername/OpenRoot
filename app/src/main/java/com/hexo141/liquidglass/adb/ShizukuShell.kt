@@ -32,6 +32,14 @@ object ShizukuShell {
     const val UID_SHELL = 2000
 
     /**
+     * How long the [probe] waits for its echo.
+     *
+     * Short on purpose: the command is one word, so a server that needs longer than this is not
+     * going to answer at all, and the caller is waiting on the answer to pick a transport.
+     */
+    private const val PROBE_TIMEOUT_MS = 4_000L
+
+    /**
      * Environment handed to every `sh -c` child.
      *
      * `envp = null` happens to work on mksh because it falls back to a built-in PATH, but the
@@ -47,6 +55,14 @@ object ShizukuShell {
         "HOME=/data/local/tmp",
         "TMPDIR=/data/local/tmp",
     )
+
+    /**
+     * Result of the last [probe]: `true` ran, `false` did not, `null` never tried.
+     *
+     * Cached because a probe is a round trip, and because [status] is read on every recomposition.
+     */
+    @Volatile
+    private var usable: Boolean? = null
 
     /** Whatever state the Shizuku link is in, so the UI can say something useful. */
     enum class Status {
@@ -64,14 +80,27 @@ object ShizukuShell {
 
         /** Running and granted. */
         READY,
+
+        /**
+         * Granted, but the server would not start a process.
+         *
+         * Permission state says nothing about whether the server can actually fork a shell, and a
+         * server that cannot is worse than none: the UI would keep offering the grant flow, which
+         * is already complete, and never mention the transport that does work.
+         */
+        UNUSABLE,
     }
 
     fun status(): Status {
         if (!isBinderAlive()) {
+            usable = null
             return if (isShizukuInstalled()) Status.NOT_RUNNING else Status.NOT_INSTALLED
         }
         return when {
-            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED -> Status.READY
+            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED ->
+                // The probe costs a round trip, so it runs once and the answer is reused until
+                // something asks for it again. A `null` here means "granted, not yet tried".
+                if (usable == false) Status.UNUSABLE else Status.READY
             Shizuku.shouldShowRequestPermissionRationale() -> Status.PERMISSION_DENIED
             else -> Status.PERMISSION_REQUIRED
         }
@@ -97,18 +126,25 @@ object ShizukuShell {
      * @return `true` when the server started a process and that process reported success.
      */
     fun probe(): Boolean {
-        if (!isReady()) return false
-        return try {
+        if (!isReady()) {
+            usable = null
+            return false
+        }
+        val ok = try {
             // A marker the server has to echo back proves three things at once: a process was
-            // started, its stdout reaches this side, and its exit status came through.
+            // started, its stdout reaches this side, and its exit status came through. The
+            // deadline matters: an unhealthy server accepts the request and then says nothing, and
+            // without a cap the probe would hang the caller instead of reporting a failure.
             val stream = openStream("shell:echo openroot-probe")
             val seen = StringBuilder()
+            val deadline = System.currentTimeMillis() + PROBE_TIMEOUT_MS
             try {
                 val buffer = ByteArray(256)
-                while (true) {
+                while (System.currentTimeMillis() < deadline) {
                     val read = runCatching { stream.read(buffer, 0, buffer.size) }.getOrDefault(-1)
                     if (read <= 0) break
                     seen.append(String(buffer, 0, read, Charsets.UTF_8))
+                    if (seen.contains("openroot-probe")) break
                 }
             } finally {
                 runCatching { stream.close() }
@@ -118,6 +154,9 @@ object ShizukuShell {
             Log.w(TAG, "probe failed", e)
             false
         }
+        usable = ok
+        if (!ok) Log.w(TAG, "granted but the server will not start a process")
+        return ok
     }
 
     /** Shows the Shizuku permission dialog; the answer arrives on the listener below. */

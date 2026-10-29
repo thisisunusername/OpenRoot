@@ -85,6 +85,10 @@ fun PairingScreen(
     manualEndpoint: String?,
     /** Connect straight to [name], skipping mDNS discovery entirely. */
     onManualConnect: (String) -> Unit,
+    /** Whether the current identity was imported through [onImportKey]. */
+    importedKey: Boolean,
+    /** Replace the ADB identity with a PKCS#8 private key pasted in by the user. */
+    onImportKey: (String) -> Unit,
     onToggle: () -> Unit,
     onExploit: () -> Unit,
     onPickEngine: (String) -> Unit,
@@ -303,6 +307,12 @@ fun PairingScreen(
                     surfaceColor = glassSurfaceColor,
                     onConnect = onManualConnect,
                 )
+                KeyImportField(
+                    imported = importedKey,
+                    backdrop = backdrop,
+                    surfaceColor = glassSurfaceColor,
+                    onImport = onImportKey,
+                )
             }
         }
 
@@ -398,6 +408,120 @@ private fun ManualEndpointField(
                 text = stringResource(R.string.adb_manual_connect),
                 style = buttonTextStyle()
             )
+        }
+    }
+}
+
+/**
+ * Shows where the ADB identity came from and accepts a replacement key.
+ *
+ * adbd refuses a key it was never told about, and the "allow debugging" prompt only exists while
+ * adbd waits for one on USB. A device that exposes `adb tcpip` instead keeps the accepted keys in
+ * `/data/misc/adb/adb_keys`, which the shell user cannot write, so an app that generated its own
+ * pair on first launch can never be authorised. Pasting the key of a client that connected before
+ * is the way around that, and it is the reason this field exists at all.
+ *
+ * The key is typed or pasted, never picked from a file: the file belongs to another app's private
+ * storage, and a text field works the same on every device.
+ */
+@Composable
+private fun KeyImportField(
+    imported: Boolean,
+    backdrop: Backdrop,
+    surfaceColor: Color,
+    onImport: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var text by remember { mutableStateOf("") }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // The label doubles as a status line: after an import there is no doubt about which
+            // identity adbd is being asked to accept.
+            BasicText(
+                text = if (imported) {
+                    stringResource(R.string.adb_key_imported)
+                } else {
+                    stringResource(R.string.adb_key_import)
+                },
+                style = TextStyle(
+                    color = Color.White.copy(alpha = 0.75f),
+                    fontSize = 13.sp,
+                    shadow = Shadow(
+                        color = Color.Black.copy(alpha = 0.45f),
+                        offset = Offset(0f, 1f),
+                        blurRadius = 6f
+                    )
+                ),
+                modifier = Modifier.weight(1f),
+            )
+            LiquidGlassButton(
+                onClick = { expanded = !expanded },
+                backdrop = backdrop,
+                surfaceColor = surfaceColor,
+                height = 40.dp,
+                horizontalPadding = 14.dp,
+            ) {
+                BasicText(
+                    text = stringResource(
+                        if (expanded) R.string.adb_key_cancel else R.string.adb_key_import
+                    ),
+                    style = buttonTextStyle()
+                )
+            }
+        }
+        if (expanded) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(120.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.35f))
+                    .padding(10.dp),
+                contentAlignment = Alignment.TopStart,
+            ) {
+                BasicTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    textStyle = TextStyle(color = Color.White, fontSize = 12.sp),
+                    cursorBrush = SolidColor(Color.White),
+                    modifier = Modifier.fillMaxWidth(),
+                    decorationBox = { inner ->
+                        if (text.isEmpty()) {
+                            BasicText(
+                                text = stringResource(R.string.adb_key_hint),
+                                style = TextStyle(
+                                    color = Color.White.copy(alpha = 0.5f),
+                                    fontSize = 12.sp,
+                                ),
+                            )
+                        }
+                        inner()
+                    },
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            LiquidGlassButton(
+                onClick = {
+                    onImport(text)
+                    text = ""
+                    expanded = false
+                },
+                backdrop = backdrop,
+                surfaceColor = surfaceColor,
+                height = 40.dp,
+                horizontalPadding = 16.dp,
+            ) {
+                BasicText(
+                    text = stringResource(R.string.adb_key_apply),
+                    style = buttonTextStyle()
+                )
+            }
         }
     }
 }

@@ -49,6 +49,13 @@
     <string name="shizuku_unusable">Shizuku is granted but cannot run commands. Pair over wireless debugging instead.</string>
     <string name="adb_manual_hint">host:port</string>
     <string name="adb_manual_connect">Connect</string>
+    <string name="adb_key_import">ADB key</string>
+    <string name="adb_key_imported">Using an imported ADB key</string>
+    <string name="adb_key_hint">-----BEGIN PRIVATE KEY----- … a PKCS#8 key that adbd already accepts</string>
+    <string name="adb_key_apply">Use this key</string>
+    <string name="adb_key_cancel">Cancel</string>
+    <string name="adb_key_rejected">That is not a PKCS#8 RSA private key</string>
+    <string name="adb_key_accepted">Key imported. Tap Connect to try it</string>
     <string name="adb_manual_failed">Could not connect to %1$s</string>
     <string name="shizuku_grant">Grant Shizuku access</string>
     <string name="shizuku_privilege">Privilege: %1$s</string>

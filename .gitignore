@@ -41,6 +41,8 @@ google-services.json
 /native-or/splicehelper
 /native-gpu/**/*.o
 /native-pct/**/*.o
+# ndk-build intermediates for the binder payload
+/native-binder54/build/
 
 # The four payload engines are committed prebuilt so the app builds without an NDK, which Google
 # does not publish for aarch64 hosts. They were extracted from the published release APK and only
@@ -51,6 +53,7 @@ google-services.json
 !/app/src/main/jniLibs/arm64-v8a/libcheese-quest.so
 !/app/src/main/jniLibs/arm64-v8a/libcheese-snapdragon.so
 !/app/src/main/jniLibs/arm64-v8a/libpct-opace6.so
+!/app/src/main/jniLibs/arm64-v8a/libbinder54.so
 
 # Everything else under jniLibs is produced by the dependency graph or copied in for the wired
 # vivo flow, so it stays out of the repository.

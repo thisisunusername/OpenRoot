@@ -65,6 +65,8 @@ class MainActivity : AppCompatActivity() {
         const val ENGINE_CVE_64560 = "cve-2026-64560"
         const val ENGINE_CVE_21479 = "cve-2025-21479"
         const val ENGINE_CVE_43284 = "cve-2026-43284"
+        /** CVE-2020-0041: binder out-of-bounds write, the 5.4 / 5.4-qgki engine. */
+        const val ENGINE_CVE_0041 = "cve-2020-0041"
 
         /** How long to wait for `_adb-tls-connect._tcp` before giving up on a direct connect. */
         const val CONNECT_TIMEOUT_MS = 6_000L
@@ -527,12 +529,13 @@ class MainActivity : AppCompatActivity() {
         val pctMatched: Boolean,
         val pctPayload: PctRunner.Payload?,
         val ghostLock: String?,
+        val binderBomb: String?,
     )
 
     private fun availability(info: DeviceInfo?): Availability {
         // No `connected.value` read here: this runs off the main thread too, where snapshot reads
         // can be stale. A non-null DeviceInfo already means the device answered.
-        if (info == null) return Availability(false, null, false, null, false, null, null)
+        if (info == null) return Availability(false, null, false, null, false, null, null, null)
         val profile = RootExploit.isPayloadPresent(this) && RootExploit.hasProfile(this, info.kernel)
         val pageCache = if (DirtyFragRunner.isPayloadPresent(this)) {
             DirtyFragRunner.describe(info.androidRelease, info.kernel)
@@ -552,6 +555,13 @@ class MainActivity : AppCompatActivity() {
         // GhostLock is the one engine whose support is decided up front: the bundled profile either
         // carries offsets for this exact `uname -r` or it does not, and nothing needs to run first.
         val ghostLock = GhostLockRunner.describe(this, info.kernel)
+        // CVE-2020-0041 is profile-driven too: it covers 5.4 and 5.4-qgki builds from one binary,
+        // and the profile either carries the eleven offsets this `uname -r` needs or it does not.
+        val binderBomb = if (BinderBombRunner.isPayloadPresent(this)) {
+            BinderBombRunner.describe(this, info.kernel)
+        } else {
+            null
+        }
         return Availability(
             profile,
             pageCache,
@@ -560,6 +570,7 @@ class MainActivity : AppCompatActivity() {
             pctMatched,
             pctPayload,
             ghostLock,
+            binderBomb,
         )
     }
 
@@ -573,6 +584,12 @@ class MainActivity : AppCompatActivity() {
         val ghostLock = available.ghostLock
         if (ghostLock != null) {
             return ghostLock to SupportState.Supported
+        }
+        // Same reasoning for CVE-2020-0041: an exact profile for this `uname -r` is a fact, not a
+        // guess, so it outranks the "worth trying" engines below.
+        val binderBomb = available.binderBomb
+        if (binderBomb != null) {
+            return binderBomb to SupportState.Supported
         }
         // A matched device build is more specific than "this SoC has a GPU", so it comes first.
         if (available.pctPayload != null) {
@@ -681,6 +698,19 @@ class MainActivity : AppCompatActivity() {
                 enabled = available.ghostLock != null || available.profile,
             ),
             ExploitChoice(
+                id = ENGINE_CVE_0041,
+                title = "CVE-2020-0041",
+                detail = when {
+                    noConnection -> "Connect to adb first"
+                    available.binderBomb != null ->
+                        "${available.binderBomb}, profile ready, $handoff"
+                    !BinderBombRunner.isPayloadPresent(this) ->
+                        "Payload not packaged for this ABI"
+                    else -> "No 5.4 / 5.4-qgki profile for $kernel"
+                },
+                enabled = available.binderBomb != null,
+            ),
+            ExploitChoice(
                 id = ENGINE_CVE_64560,
                 title = "CVE-2026-64560",
                 detail = when {
@@ -740,6 +770,8 @@ class MainActivity : AppCompatActivity() {
         // decided after a fresh resolve inside the worker, not from the cached value.
         when (engineId) {
             ENGINE_CVE_43499 -> if (!RootExploit.hasProfile(this, info.kernel)) return
+            ENGINE_CVE_0041 ->
+                if (!BinderBombRunner.isSupported(this, info.kernel)) return
             ENGINE_CVE_64560 -> if (pctPayload == null) return
             ENGINE_CVE_21479 -> if (gpuPayload == null) return
             else -> if (!DirtyFragRunner.isSupported(info.androidRelease, info.kernel)) return
@@ -760,6 +792,7 @@ class MainActivity : AppCompatActivity() {
                     ?.takeIf { it.packageName.isNotEmpty() }
                 when {
                     engineId == ENGINE_CVE_43499 -> runProfileEngine(info, ksud)
+                    engineId == ENGINE_CVE_0041 -> runBinderEngine(info, ksud)
                     pctPayload != null -> runPctEngine(info, pctPayload, ksud)
                     gpuPayload != null -> runGpuEngine(info, gpuPayload, ksud)
                     else -> runPageCacheEngine(
@@ -818,6 +851,24 @@ class MainActivity : AppCompatActivity() {
             result.exitCode == 0 -> getString(R.string.exploit_finished)
             else -> getString(R.string.exploit_exit_code, result.exitCode)
         }
+    }
+
+    /**
+     * CVE-2020-0041: same shape as the GPU engine, but the payload is profile-driven so the runner
+     * stages an offset file next to the binary. One binary covers plain 5.4 and 5.4-qgki; which
+     * kernel it is targeting is decided entirely by that profile.
+     */
+    private fun runBinderEngine(info: DeviceInfo, ksud: KsuManager.Target?): String {
+        val result = BinderBombRunner.run(
+            context = this,
+            manager = AdbConnectionManager.get(this),
+            kernelRelease = info.kernel,
+            suManager = ksud,
+            onLine = ::logLine,
+            onProgress = ::reportProgress,
+        )
+        ExploitMemory.record(this, info.kernel, result.handoff.rooted, ExploitMemory.ENGINE_BINDER)
+        return reportHandoff(ksud, result.handoff, result.exitCode)
     }
 
     /**

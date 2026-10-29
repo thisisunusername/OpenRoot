@@ -90,7 +90,9 @@ fun PairingScreen(
         else Color.Unspecified
 
     // Shizuku is the preferred route: it needs no wireless debugging and no pairing code, so when
-    // it is usable the ADB pairing button is never shown at all.
+    // it is usable the ADB pairing button is never shown at all. `UNUSABLE` is the exception: the
+    // grant is already in place, the server simply will not start a process, so offering the grant
+    // again would be a dead end and the pairing route has to be shown instead.
     val shizukuUsable = shizukuStatus == ShizukuShell.Status.READY ||
         shizukuStatus == ShizukuShell.Status.PERMISSION_REQUIRED
     // Hidden once paired; only a failed direct connect (needsPairing) brings it back.
@@ -102,6 +104,7 @@ fun PairingScreen(
         shizukuStatus == ShizukuShell.Status.READY -> "Shizuku ready"
         shizukuStatus == ShizukuShell.Status.PERMISSION_REQUIRED -> "Shizuku access needed"
         shizukuStatus == ShizukuShell.Status.PERMISSION_DENIED -> "Shizuku access denied"
+        shizukuStatus == ShizukuShell.Status.UNUSABLE -> "Shizuku cannot run commands"
         shizukuStatus == ShizukuShell.Status.NOT_RUNNING -> "Shizuku not running"
         paired -> "Waiting for adbd"
         else -> "Not paired"

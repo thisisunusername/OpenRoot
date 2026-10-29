@@ -149,6 +149,9 @@ class MainActivity : AppCompatActivity() {
     /** Auto-connect at most once per foreground entry, so a failure does not loop. */
     private var autoConnectTried = false
 
+    /** The Shizuku probe runs once per activity, so the transport is not re-tested constantly. */
+    private var shizukuProbed = false
+
     private val refreshHandler = Handler(Looper.getMainLooper())
 
     /** Activity-scoped so a running vivo flow survives tab switches; released in onDestroy. */
@@ -168,6 +171,30 @@ class MainActivity : AppCompatActivity() {
         if (paired.value && !connected.value && !connecting.value) {
             connect(silent = false)
         }
+    }
+
+    /**
+     * Asks the Shizuku server to prove it can start a process, once per foreground entry.
+     *
+     * Runs the probe on a worker thread: it opens a real channel, and a server that is unhealthy
+     * answers slowly or not at all. When it fails the status becomes [ShizukuShell.Status.UNUSABLE]
+     * and the pairing button appears, which is the only way out of a grant that is already given.
+     */
+    private val shizukuProbe = Runnable {
+        if (shizukuProbed) return@Runnable
+        shizukuProbed = true
+        Thread({
+            val usable = ShizukuShell.probe()
+            refreshHandler.post {
+                // Re-read the status: probe() cached the answer, so this now reports UNUSABLE.
+                shizukuStatus.value = ShizukuShell.status()
+                if (!usable) {
+                    // Give the user the transport that works instead of leaving them on a dead end.
+                    autoConnectTried = false
+                    maybeAutoConnect()
+                }
+            }
+        }, "shizuku-probe").start()
     }
 
     private val requestNotificationPermission =
@@ -418,6 +445,12 @@ class MainActivity : AppCompatActivity() {
         if (updatePairing) pairingRunning.value = AdbPairingService.isRunning()
         // Cheap enough to poll: one binder ping plus one permission check.
         shizukuStatus.value = ShizukuShell.status()
+        // A granted server still has to prove it can start a process, and the grant button is the
+        // dead end that appears when it cannot. Probe off the main thread so the screen is not
+        // blocked, then refresh the status once the answer is known.
+        if (shizukuStatus.value == ShizukuShell.Status.READY) {
+            refreshHandler.post(shizukuProbe)
+        }
         val wasPaired = paired.value
         val isPaired = PairingState(this).isPaired
         paired.value = isPaired
@@ -455,7 +488,9 @@ class MainActivity : AppCompatActivity() {
         if (autoConnectTried) return
         if (pairingRunning.value || connected.value || connecting.value) return
         // Shizuku is ready and already granted: connect without any ADB key or pairing at all.
-        if (ShizukuShell.isReady()) {
+        // `status()` reports UNUSABLE once the probe failed, so a server that cannot start a
+        // process falls through to the pairing route instead of being retried forever.
+        if (ShizukuShell.status() == ShizukuShell.Status.READY) {
             autoConnectTried = true
             connect()
             return

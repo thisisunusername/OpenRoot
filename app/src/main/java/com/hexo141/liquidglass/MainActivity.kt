@@ -525,12 +525,13 @@ class MainActivity : AppCompatActivity() {
         val gpuPayload: GpuRunner.Payload?,
         val pctMatched: Boolean,
         val pctPayload: PctRunner.Payload?,
+        val ghostLock: String?,
     )
 
     private fun availability(info: DeviceInfo?): Availability {
         // No `connected.value` read here: this runs off the main thread too, where snapshot reads
         // can be stale. A non-null DeviceInfo already means the device answered.
-        if (info == null) return Availability(false, null, false, null, false, null)
+        if (info == null) return Availability(false, null, false, null, false, null, null)
         val profile = RootExploit.isPayloadPresent(this) && RootExploit.hasProfile(this, info.kernel)
         val pageCache = if (DirtyFragRunner.isPayloadPresent(this)) {
             DirtyFragRunner.describe(info.androidRelease, info.kernel)
@@ -547,13 +548,30 @@ class MainActivity : AppCompatActivity() {
         val pctMatched = PctRunner.isSupported(info)
         val pctPayload = PctRunner.payloadFor(info)
             ?.takeIf { PctRunner.isPayloadPresent(this, it) }
-        return Availability(profile, pageCache, gpuMatched, gpuPayload, pctMatched, pctPayload)
+        // GhostLock is the one engine whose support is decided up front: the bundled profile either
+        // carries offsets for this exact `uname -r` or it does not, and nothing needs to run first.
+        val ghostLock = GhostLockRunner.describe(this, info.kernel)
+        return Availability(
+            profile,
+            pageCache,
+            gpuMatched,
+            gpuPayload,
+            pctMatched,
+            pctPayload,
+            ghostLock,
+        )
     }
 
     private fun resolveEngine(info: DeviceInfo): Pair<String?, SupportState> {
         val available = availability(info)
         if (available.profile) {
             return getString(R.string.engine_kernel_profile) to SupportState.Supported
+        }
+        // GhostLock comes before the payload engines: its support is a data question the bundled
+        // profile set answers immediately, while the others can only promise "worth trying".
+        val ghostLock = available.ghostLock
+        if (ghostLock != null) {
+            return ghostLock to SupportState.Supported
         }
         // A matched device build is more specific than "this SoC has a GPU", so it comes first.
         if (available.pctPayload != null) {
@@ -653,12 +671,13 @@ class MainActivity : AppCompatActivity() {
                 id = ENGINE_CVE_43499,
                 title = "CVE-2026-43499",
                 detail = when {
-                    available.profile -> "Kernel profile for $kernel"
                     noConnection -> "Connect to adb first"
+                    available.ghostLock != null -> "${available.ghostLock}, profile ready"
+                    available.profile -> "Kernel profile for $kernel"
                     !RootExploit.isPayloadPresent(this) -> "Payload not packaged for this ABI"
                     else -> "No profile for $kernel"
                 },
-                enabled = available.profile,
+                enabled = available.ghostLock != null || available.profile,
             ),
             ExploitChoice(
                 id = ENGINE_CVE_64560,
@@ -718,9 +737,10 @@ class MainActivity : AppCompatActivity() {
         // CVE-2026-43284 hands off to a manager when one is installed, otherwise it keeps a root
         // command channel; the page cache engine itself does not care which. Which one applies is
         // decided after a fresh resolve inside the worker, not from the cached value.
+        val ghostLockProfile = GhostLockRunner.profileFor(this, info.kernel)
         when (engineId) {
             ENGINE_CVE_43499 ->
-                if (!RootExploit.hasProfile(this, info.kernel)) return
+                if (!RootExploit.hasProfile(this, info.kernel) && ghostLockProfile == null) return
             ENGINE_CVE_64560 -> if (pctPayload == null) return
             ENGINE_CVE_21479 -> if (gpuPayload == null) return
             else -> if (!DirtyFragRunner.isSupported(info.androidRelease, info.kernel)) return
@@ -737,6 +757,21 @@ class MainActivity : AppCompatActivity() {
             // Resolving ksud scans /data/app over ADB: done once on this worker and shared by all
             // four engines, which also puts the scan itself in the log.
             val outcome = runCatching {
+                // A GhostLock profile exists but the native exploit is not linked into this build
+                // yet, so say so instead of silently falling through to an engine that has no
+                // profile for this kernel.
+                if (engineId == ENGINE_CVE_43499 &&
+                    ghostLockProfile != null &&
+                    !RootExploit.hasProfile(this, info.kernel)
+                ) {
+                    logLine("$ ghostlock ${ghostLockProfile.release}")
+                    logLine("<i> profile loaded from assets/ghostlock/")
+                    logLine("<e> the GhostLock native binary is not packaged in this build yet")
+                    throw IllegalStateException(
+                        "GhostLock profile found for ${ghostLockProfile.release}; " +
+                            "the exploit binary lands in a later build",
+                    )
+                }
                 val ksud = KsuManager.resolve(this, AdbConnectionManager.get(this), ::logLine)
                     ?.takeIf { it.packageName.isNotEmpty() }
                 when {

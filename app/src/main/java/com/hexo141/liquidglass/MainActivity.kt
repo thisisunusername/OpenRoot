@@ -532,10 +532,20 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     val error = outcome.exceptionOrNull()
                     Log.w(TAG, "connect failed (silent=$silent)", error)
-                    // Nothing to ask the user for when Shizuku is the reason we are not connected:
-                    // the fix is in the Shizuku app, not in a pairing code.
-                    if (ShizukuShell.isBinderAlive()) {
+                    // Only blame the grant when the grant is actually the problem. A live binder is
+                    // not enough: a server that answers but cannot start a process keeps the binder
+                    // alive, and telling the user to grant again sends them in circles because the
+                    // grant is already there. That case belongs on the pairing route below.
+                    val shizukuStatus = ShizukuShell.status()
+                    if (shizukuStatus == ShizukuShell.Status.PERMISSION_REQUIRED ||
+                        shizukuStatus == ShizukuShell.Status.PERMISSION_DENIED
+                    ) {
                         toast(R.string.shizuku_permission_required)
+                        return@runOnUiThread
+                    }
+                    if (shizukuStatus == ShizukuShell.Status.UNUSABLE) {
+                        toast(R.string.shizuku_unusable)
+                        needsPairing.value = true
                         return@runOnUiThread
                     }
                     if (silent) return@runOnUiThread

@@ -150,6 +150,32 @@ val buildNativePct = tasks.register<Exec>("buildNativePct") {
 }
 
 /**
+ * CVE-2020-0041: the binder out-of-bounds write payload for 5.4 and 5.4-qgki.
+ *
+ * Built with `ndk-build` rather than a hand-written Makefile because that is what the upstream PoC
+ * ships with; `Android.mk` names the module `binder54` and `Application.mk` pins arm64-v8a.
+ */
+val buildNativeBinder54 = tasks.register<Exec>("buildNativeBinder54") {
+    group = "build"
+    description = "Compiles the arm64 binder OOB-write payload with the NDK"
+    enabled = buildNative
+    workingDir = rootProject.layout.projectDirectory.dir("native-binder54").asFile
+    val ndkBuild = "$ndkDir/ndk-build"
+    commandLine(
+        if (System.getProperty("os.name").lowercase().contains("win")) "$ndkBuild.cmd" else ndkBuild,
+        "-j4",
+        "NDK_PROJECT_PATH=.",
+        "APP_BUILD_SCRIPT=Android.mk",
+        "NDK_APPLICATION_MK=Application.mk",
+        "NDK_OUT=build/obj",
+        "NDK_LIBS_OUT=build/libs",
+    )
+    inputs.dir(rootProject.layout.projectDirectory.dir("native-binder54"))
+    // ndk-build writes executables under `$NDK_LIBS_OUT/<abi>/`; the ABI comes from Application.mk.
+    outputs.file(layout.buildDirectory.file("binder54/arm64-v8a/binder54"))
+}
+
+/**
  * The only task that writes into jniLibs. When the payloads are prebuilt this does nothing, so
  * the committed .so files are packaged exactly as they were released.
  */
@@ -158,6 +184,7 @@ val prepareNativePayloads = tasks.register<Copy>("prepareNativePayloads") {
     description = "Copies every compiled payload into jniLibs"
     enabled = buildNative
     dependsOn(buildNativeExploit, buildNativePageCache, buildNativeGpu, buildNativePct)
+    dependsOn(buildNativeBinder54)
     from(layout.buildDirectory.file("native/ghostlock")) {
         rename { "libghostlock.so" }
     }
@@ -169,6 +196,12 @@ val prepareNativePayloads = tasks.register<Copy>("prepareNativePayloads") {
     }
     from(layout.buildDirectory.dir("pct")) {
         include("libpct-opace6.so")
+    }
+    // Android only unpacks `lib*.so` from jniLibs, so the executable is packaged under a library
+    // name; nativeLibraryDir exposes it at that name and the runner execs it as a file.
+    from(layout.buildDirectory.dir("binder54/arm64-v8a")) {
+        include("binder54")
+        rename { "libbinder54.so" }
     }
     into(jniLibsDir)
 }
@@ -185,6 +218,7 @@ val stripNativePayloads = tasks.register<Exec>("stripNativePayloads") {
         "libcheese-quest.so",
         "libcheese-snapdragon.so",
         "libpct-opace6.so",
+        "libbinder54.so",
     ).map { jniLibsDir.file(it).asFile.absolutePath }
     commandLine(listOf(ndkStrip, "--strip-all") + targets)
     inputs.files(targets.map { File(it) })

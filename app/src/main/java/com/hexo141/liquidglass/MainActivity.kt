@@ -737,10 +737,8 @@ class MainActivity : AppCompatActivity() {
         // CVE-2026-43284 hands off to a manager when one is installed, otherwise it keeps a root
         // command channel; the page cache engine itself does not care which. Which one applies is
         // decided after a fresh resolve inside the worker, not from the cached value.
-        val ghostLockProfile = GhostLockRunner.profileFor(this, info.kernel)
         when (engineId) {
-            ENGINE_CVE_43499 ->
-                if (!RootExploit.hasProfile(this, info.kernel) && ghostLockProfile == null) return
+            ENGINE_CVE_43499 -> if (!RootExploit.hasProfile(this, info.kernel)) return
             ENGINE_CVE_64560 -> if (pctPayload == null) return
             ENGINE_CVE_21479 -> if (gpuPayload == null) return
             else -> if (!DirtyFragRunner.isSupported(info.androidRelease, info.kernel)) return
@@ -757,21 +755,6 @@ class MainActivity : AppCompatActivity() {
             // Resolving ksud scans /data/app over ADB: done once on this worker and shared by all
             // four engines, which also puts the scan itself in the log.
             val outcome = runCatching {
-                // A GhostLock profile exists but the native exploit is not linked into this build
-                // yet, so say so instead of silently falling through to an engine that has no
-                // profile for this kernel.
-                if (engineId == ENGINE_CVE_43499 &&
-                    ghostLockProfile != null &&
-                    !RootExploit.hasProfile(this, info.kernel)
-                ) {
-                    logLine("$ ghostlock ${ghostLockProfile.release}")
-                    logLine("<i> profile loaded from assets/ghostlock/")
-                    logLine("<e> the GhostLock native binary is not packaged in this build yet")
-                    throw IllegalStateException(
-                        "GhostLock profile found for ${ghostLockProfile.release}; " +
-                            "the exploit binary lands in a later build",
-                    )
-                }
                 val ksud = KsuManager.resolve(this, AdbConnectionManager.get(this), ::logLine)
                     ?.takeIf { it.packageName.isNotEmpty() }
                 when {

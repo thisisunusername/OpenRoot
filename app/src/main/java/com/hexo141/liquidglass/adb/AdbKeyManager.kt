@@ -3,10 +3,13 @@ package com.hexo141.liquidglass.adb
 import android.content.Context
 import android.util.Base64
 import android.util.Log
+import org.bouncycastle.asn1.DERNull
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers
 import org.bouncycastle.asn1.pkcs.PrivateKeyInfo
 import org.bouncycastle.asn1.pkcs.RSAPrivateKey
 import org.bouncycastle.asn1.pkcs.RSAPublicKey
 import org.bouncycastle.asn1.x500.X500Name
+import org.bouncycastle.asn1.x509.AlgorithmIdentifier
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
 import org.bouncycastle.cert.X509v3CertificateBuilder
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
@@ -63,19 +66,34 @@ class AdbKeyManager(context: Context) {
     private val preferences = context.applicationContext
         .getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
 
+    /**
+     * The identity the connection layer reads.
+     *
+     * `AbsAdbConnectionManager` asks for the key on every handshake rather than caching it, but an
+     * import can still happen while a manager is alive, so the values live in mutable holders and
+     * the public properties read through them. Declared before `init` because the initialisation
+     * block is what fills them in.
+     */
+    @Volatile
+    private var activePrivateKey: PrivateKey? = null
+    @Volatile
+    private var activeCertificate: X509Certificate? = null
+
     val privateKey: PrivateKey
+        get() = checkNotNull(activePrivateKey) { "the adb key was never loaded" }
     val certificate: X509Certificate
+        get() = checkNotNull(activeCertificate) { "the adb certificate was never loaded" }
 
     init {
         val loaded = load()
         if (loaded != null) {
-            privateKey = loaded.first
-            certificate = loaded.second
+            activePrivateKey = loaded.first
+            activeCertificate = loaded.second
         } else {
             val generated = generate()
-            privateKey = generated.first
-            certificate = generated.second
-            save(privateKey, certificate)
+            activePrivateKey = generated.first
+            activeCertificate = generated.second
+            save(generated.first, generated.second)
         }
         Log.d(TAG, "adb key ready: ${certificate.subjectX500Principal}")
     }
@@ -148,6 +166,11 @@ class AdbKeyManager(context: Context) {
         // certificate itself is never inspected, so a throwaway self-signed one is enough.
         val certificate = runCatching { selfSign(key) }.getOrNull() ?: return false
         save(key, certificate)
+        // The manager already handed out the previous identity, so the live values are swapped
+        // here too: storing the key alone would only take effect after a process restart.
+        activePrivateKey = key
+        activeCertificate = certificate
+        preferences.edit().putBoolean(KEY_IMPORTED, true).apply()
         Log.d(TAG, "imported an external adb key: ${certificate.subjectX500Principal}")
         return true
     }
@@ -155,8 +178,11 @@ class AdbKeyManager(context: Context) {
     /** Wraps [privateKey] in a self-signed certificate carrying the matching public key. */
     private fun selfSign(privateKey: JcaRsaPrivateKey): X509Certificate {
         val rsa = RSAPrivateKey.getInstance(PrivateKeyInfo.getInstance(privateKey.encoded))
+        // The algorithm identifier is spelled out because the single-argument overload of
+        // SubjectPublicKeyInfo takes an ASN.1 sequence, not the bare RSA public key.
+        val algorithm = AlgorithmIdentifier(PKCSObjectIdentifiers.rsaEncryption, DERNull.INSTANCE)
         val publicKey = KeyFactory.getInstance("RSA").generatePublic(
-            SubjectPublicKeyInfo(RSAPublicKey(rsa.modulus, rsa.publicExponent))
+            SubjectPublicKeyInfo(algorithm, RSAPublicKey(rsa.modulus, rsa.publicExponent))
         )
         val name = X500Name("CN=00")
         val signer = JcaContentSignerBuilder("SHA256withRSA").build(privateKey)

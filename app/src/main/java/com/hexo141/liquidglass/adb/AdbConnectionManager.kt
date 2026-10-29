@@ -75,9 +75,21 @@ class AdbConnectionManager private constructor(private val context: Context) : A
     @Throws(IOException::class, InterruptedException::class, AdbPairingRequiredException::class)
     fun connect(context: Context, timeoutMillis: Long): Boolean {
         if (ShizukuShell.isReady()) {
-            useShizuku(true)
-            Log.i(TAG, "connected via Shizuku (${ShizukuShell.describePrivilege()})")
-            return true
+            // "Allowed" is not "usable": a server can hold the permission and still answer a start
+            // request with nothing, and the app would then report a working transport while every
+            // command quietly produced no output. One echo decides which case this is.
+            if (ShizukuShell.probe()) {
+                useShizuku(true)
+                Log.i(TAG, "connected via Shizuku (${ShizukuShell.describePrivilege()})")
+                return true
+            }
+            Log.w(
+                TAG,
+                "Shizuku is granted but could not start a process; falling back to ADB over TLS",
+            )
+            // Hand `shell:` back to the daemon: leaving the Shizuku hook installed would keep
+            // routing every command into the server that just failed its probe.
+            useShizuku(false)
         }
         val ok = connectTls(context, timeoutMillis)
         if (ok) transport = Transport.ADB

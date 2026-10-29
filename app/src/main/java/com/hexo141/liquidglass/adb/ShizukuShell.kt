@@ -86,6 +86,40 @@ object ShizukuShell {
      */
     fun isReady(): Boolean = status() == Status.READY
 
+    /**
+     * Runs one harmless command through the server to prove shells actually work.
+     *
+     * [isReady] only asks whether the binder is reachable and the permission is granted, which
+     * stays `true` for a server that cannot start a process at all - the app then reports a
+     * connected transport and every later step silently produces nothing. A single `true` costs one
+     * round trip and distinguishes "allowed" from "usable".
+     *
+     * @return `true` when the server started a process and that process reported success.
+     */
+    fun probe(): Boolean {
+        if (!isReady()) return false
+        return try {
+            // A marker the server has to echo back proves three things at once: a process was
+            // started, its stdout reaches this side, and its exit status came through.
+            val stream = openStream("shell:echo openroot-probe")
+            val seen = StringBuilder()
+            try {
+                val buffer = ByteArray(256)
+                while (true) {
+                    val read = runCatching { stream.read(buffer, 0, buffer.size) }.getOrDefault(-1)
+                    if (read <= 0) break
+                    seen.append(String(buffer, 0, read, Charsets.UTF_8))
+                }
+            } finally {
+                runCatching { stream.close() }
+            }
+            seen.contains("openroot-probe")
+        } catch (e: Exception) {
+            Log.w(TAG, "probe failed", e)
+            false
+        }
+    }
+
     /** Shows the Shizuku permission dialog; the answer arrives on the listener below. */
     fun requestPermission(requestCode: Int) {
         if (!isBinderAlive() || Shizuku.isPreV11()) return

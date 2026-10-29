@@ -53,21 +53,17 @@ class AdbConnectionManager private constructor(private val context: Context) : A
      */
     fun useShizuku(enabled: Boolean) {
         if (enabled) {
-            setLocalShell { destination -> ShizukuShell.openStream(stripPty(destination)) }
+            // Shizuku gets the destination verbatim: it has no service layer, so `ShizukuShell`
+            // strips the `shell:` / `shell,pty:` prefix itself and runs the rest through `sh`.
+            // Stripping only `shell,pty:` here used to leave `shell:ls` on the command line, and
+            // `sh` reported every such command as `inaccessible or not found`.
+            setLocalShell { destination -> ShizukuShell.openStream(destination) }
             transport = Transport.SHIZUKU
         } else {
             setLocalShell(null)
             transport = Transport.NONE
         }
     }
-
-    /**
-     * `shell,pty:cmd` means "give me a terminal" on an ADB daemon. Shizuku has no pty, so the
-     * suffix is dropped instead of being passed through as a weird service name.
-     */
-    private fun stripPty(destination: String): String =
-        if (destination.startsWith("shell,pty:")) "shell:" + destination.removePrefix("shell,pty:")
-        else destination
 
     /**
      * Connects using whichever transport is available, Shizuku first.

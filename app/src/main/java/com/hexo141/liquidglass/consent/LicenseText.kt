@@ -21,7 +21,7 @@ object LicenseText {
 
     const val MIRROR_GNU = "https://gnu.net.cn/licenses/gpl-3.0.txt"
     const val MIRROR_REPO =
-        "https://raw.githubusercontent.com/hexo141/OpenRoot/refs/heads/main/LICENSE"
+        "https://raw.githubusercontent.com/thisisunusername/OpenRoot/refs/heads/main/LICENSE"
 
     private const val ASSET = "licenses/gpl-3.0.txt"
     private const val CONNECT_TIMEOUT_MS = 4_000
@@ -32,7 +32,7 @@ object LicenseText {
     private const val MIN_LENGTH = 20_000
 
     private const val LABEL_GNU = "gnu.net.cn"
-    private const val LABEL_REPO = "github.com/hexo141/OpenRoot"
+    private const val LABEL_REPO = "github.com/thisisunusername/OpenRoot"
     private const val LABEL_BUNDLED = "bundled copy"
 
     /** Blocking: call from a worker thread. Never throws, always returns a usable text. */

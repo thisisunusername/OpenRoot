@@ -307,7 +307,7 @@ private fun buttonTextStyle() = TextStyle(
 private val ExploitBlue = Color(0xFF0A84FF)
 
 /** Repository link shown next to the title. */
-private const val PROJECT_URL = "https://github.com/hexo141/OpenRoot"
+private const val PROJECT_URL = "https://github.com/thisisunusername/OpenRoot"
 
 /** GitHub mark, drawn straight from the source path so no extra drawable is needed. */
 @Composable

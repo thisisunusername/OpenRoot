@@ -433,13 +433,26 @@ private object UpdateChecker {
 }
 
 /**
- * Contributors of the repository, from `GET /repos/hexo141/OpenRoot/contributors`.
+ * Contributors of the repository, from `GET /repos/thisisunusername/OpenRoot/contributors`.
  *
  * The result is kept for the process lifetime (60 unauthenticated requests an hour is plenty for
- * one load) and the owner is used when the request cannot be made, so the row is never empty.
+ * one load) and [fallback] is used when the request cannot be made, so the row is never empty.
+ *
+ * The fallback names this fork's owner rather than upstream: the person who built the APK the user
+ * is holding is the one who should be reachable from its About screen, and the GitHub API is not
+ * reachable at all on many of the networks this app runs on.
  */
 private object GitHubContributors {
-    val fallback = listOf(Contributor("hexo141", "https://github.com/hexo141.png?size=144"))
+    /** Owner of this fork, also the first avatar shown while the API answer is missing. */
+    private const val OWNER = "thisisunusername"
+    private const val OWNER_ID = "318477221"
+
+    val fallback = listOf(
+        Contributor(
+            OWNER,
+            "https://avatars.githubusercontent.com/u/$OWNER_ID?v=4&size=144"
+        )
+    )
 
     @Volatile
     private var cache: List<Contributor>? = null
@@ -451,9 +464,23 @@ private object GitHubContributors {
                 .onFailure { android.util.Log.w("About", "contributors request failed", it) }
                 .getOrNull()
         }
-        val list = fetched?.takeIf { it.isNotEmpty() } ?: cache ?: fallback
+        val list = withOwnerFirst(fetched?.takeIf { it.isNotEmpty() } ?: cache ?: fallback)
         cache = list
         return list
+    }
+
+    /**
+     * Moves this fork's owner to the front of the row.
+     *
+     * GitHub orders contributors by commit count, so on a fork the upstream author comes first and
+     * the maintainer of this build can end up inside the "+N" overflow bubble - or missing
+     * entirely, because the upstream repository has thousands of commits and this one has a few.
+     * The row is small and mostly cosmetic, but the one avatar a user is most likely to tap is the
+     * person who published the APK, so that one is pinned.
+     */
+    private fun withOwnerFirst(list: List<Contributor>): List<Contributor> {
+        val owner = list.firstOrNull { it.login.equals(OWNER, ignoreCase = true) } ?: fallback.first()
+        return listOf(owner) + list.filterNot { it.login.equals(owner.login, ignoreCase = true) }
     }
 
     private fun fetch(): List<Contributor> {

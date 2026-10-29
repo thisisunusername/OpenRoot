@@ -43,6 +43,27 @@ class AdbConnectionManager private constructor(private val context: Context) : A
 
     override fun getDeviceName(): String = AdbPairingService.DEVICE_NAME
 
+    /**
+     * Swaps the ADB identity for a private key that was generated somewhere else.
+     *
+     * A device running `adb tcpip` never shows the "allow debugging" prompt, so adbd rejects every
+     * key it does not already have in `/data/misc/adb/adb_keys` - and that directory is closed to
+     * the shell user. Reusing the key of a client that connected before is the only way in without
+     * root. The pairing flag is cleared afterwards because the new identity has not been accepted
+     * yet, which keeps the main screen offering a connection instead of assuming one works.
+     *
+     * @return `true` when the key was parsed and stored, so a reconnect is worth attempting.
+     */
+    fun importKey(pem: String): Boolean {
+        if (!keyManager.importPrivateKey(pem)) return false
+        PairingState(context).isPaired = false
+        transport = Transport.NONE
+        return true
+    }
+
+    /** Whether the identity in use came from [importKey] rather than being generated here. */
+    fun hasImportedKey(): Boolean = keyManager.isImported()
+
     fun activeTransport(): Transport = transport
 
     /**

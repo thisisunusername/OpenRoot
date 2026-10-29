@@ -113,6 +113,9 @@ class MainActivity : AppCompatActivity() {
     /** The endpoint typed in the manual field, or `null` before one worked. */
     private val manualEndpoint = mutableStateOf<String?>(null)
 
+    /** Whether the ADB identity came from the import field instead of being generated here. */
+    private val importedKey = mutableStateOf(false)
+
     /** Device info: local props first, replaced by the values read over ADB once connected. */
     private val deviceInfo = mutableStateOf<DeviceInfo?>(null)
 
@@ -299,6 +302,8 @@ class MainActivity : AppCompatActivity() {
                                 backdrop = backdrop,
                                 manualEndpoint = manualEndpoint.value,
                                 onManualConnect = ::connectManual,
+                                importedKey = importedKey.value,
+                                onImportKey = ::importKey,
                                 onToggle = ::onPrimaryAction,
                                 onExploit = ::openEnginePicker,
                                 onPickEngine = ::startExploit,
@@ -462,6 +467,9 @@ class MainActivity : AppCompatActivity() {
         if (manualEndpoint.value == null) {
             manualEndpoint.value = PairingState(this).manualEndpoint
         }
+        // Read from storage rather than kept in memory only: an import survives a process restart,
+        // and the label has to agree with the key that is actually stored.
+        importedKey.value = AdbConnectionManager.get(this).hasImportedKey()
         val isConnected = AdbConnectionManager.isConnected()
         connected.value = isConnected
         if (!isConnected) {
@@ -533,6 +541,36 @@ class MainActivity : AppCompatActivity() {
             }
         }, "adb-manual-connect").start()
     }
+
+    /**
+     * Replaces the ADB identity with a key that adbd already accepts.
+     *
+     * adbd refuses every key it was never told about, and the "allow debugging" prompt only
+     * appears while a connection is waiting on USB. On a device that only exposes `adb tcpip`
+     * the accepted keys live in `/data/misc/adb/adb_keys`, which the shell user cannot write,
+     * so the key of a client that connected before is the only one that will ever be accepted.
+     *
+     * Storing the key is enough on its own; the connect button then has to be pressed, because
+     * the destination is a separate choice the user already made in the field above.
+     */
+    private fun importKey(pem: String) {
+        if (pem.isBlank()) return
+        val accepted = AdbConnectionManager.get(this).importKey(pem)
+        Toast.makeText(
+            this,
+            if (accepted) getString(R.string.adb_key_accepted)
+            else getString(R.string.adb_key_rejected),
+            Toast.LENGTH_LONG,
+        ).show()
+        if (accepted) {
+            importedKey.value = true
+            // The new identity was never accepted anywhere, so a stale flag would hide the
+            // pairing button and make the screen look ready when it is not.
+            paired.value = false
+            connected.value = false
+        }
+    }
+
 
     /**
      * Connect directly when the device is already paired instead of asking for a code again; only a

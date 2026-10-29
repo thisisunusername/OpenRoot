@@ -30,5 +30,7 @@ typedef struct pending_node
 void *pending_node_thread(void *args);
 pthread_t add_pending_node(struct binder_state *from, uint64_t pending_node);
 pthread_t pending_node_create(struct binder_state *bs, uint64_t node);
-
+// Called from endpoint.c. Without this prototype the compiler assumed an int return and passed
+// the pthread_t as an int, which truncates the handle on arm64.
+void terminate_pending_node(pthread_t th);
 #endif /*! PENDING_NODE_H_ */

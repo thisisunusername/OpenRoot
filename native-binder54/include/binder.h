@@ -114,6 +114,11 @@ int binder_transaction(struct binder_state *bs, bool one_way, uint32_t handle, v
 void binder_free_buffer(struct binder_state *bs, binder_uintptr_t buffer_to_free);
 void binder_free_buffers(struct binder_state *bs, binder_uintptr_t buffer_to_free);
 
-
+// These three are defined in binder.c and used by other translation units. Upstream relied on
+// C's implicit declaration, which assumes an int return and truncates pointer arguments - on
+// arm64 that silently corrupts a 64-bit pointer, so the prototypes are spelled out here.
+uint32_t binder_read_next(struct binder_state *bs, void *data, uint32_t *remaining, uint32_t *consumed);
+void binder_send_reply(struct binder_state *bs, struct binder_io *reply, binder_uintptr_t buffer_to_free, int status);
+void bio_init_from_txn(struct binder_io *bio, struct binder_transaction_data *txn);
 
 #endif

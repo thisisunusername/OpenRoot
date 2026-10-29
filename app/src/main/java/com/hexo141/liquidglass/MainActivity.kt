@@ -513,7 +513,11 @@ class MainActivity : AppCompatActivity() {
                     loadDeviceInfo()
                 } else {
                     Log.w(TAG, "manual connect to $endpoint failed", outcome.exceptionOrNull())
-                    toast(getString(R.string.adb_manual_failed, endpoint))
+                    Toast.makeText(
+                        this,
+                        getString(R.string.adb_manual_failed, endpoint),
+                        Toast.LENGTH_SHORT,
+                    ).show()
                 }
             }
         }, "adb-manual-connect").start()

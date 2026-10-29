@@ -182,8 +182,9 @@ val buildNativeBinder54 = tasks.register<Exec>("buildNativeBinder54") {
         "NDK_LIBS_OUT=build/libs",
     )
     inputs.dir(rootProject.layout.projectDirectory.dir("native-binder54"))
-    // ndk-build writes executables under `$NDK_LIBS_OUT/<abi>/`; the ABI comes from Application.mk.
-    outputs.file(layout.buildDirectory.file("binder54/arm64-v8a/binder54"))
+    // ndk-build writes executables under `$NDK_LIBS_OUT/<abi>/`, and NDK_LIBS_OUT is relative to
+    // the working directory, which is native-binder54.
+    outputs.file(rootProject.layout.projectDirectory.file("native-binder54/build/libs/arm64-v8a/binder54"))
 }
 
 /**
@@ -210,7 +211,9 @@ val prepareNativePayloads = tasks.register<Copy>("prepareNativePayloads") {
     }
     // Android only unpacks `lib*.so` from jniLibs, so the executable is packaged under a library
     // name; nativeLibraryDir exposes it at that name and the runner execs it as a file.
-    from(layout.buildDirectory.dir("binder54/arm64-v8a")) {
+    // ndk-build puts it in native-binder54/build/libs/arm64-v8a (NDK_LIBS_OUT is relative to that
+    // working directory), not in this module's build directory.
+    from(rootProject.layout.projectDirectory.dir("native-binder54/build/libs/arm64-v8a")) {
         include("binder54")
         rename { "libbinder54.so" }
     }

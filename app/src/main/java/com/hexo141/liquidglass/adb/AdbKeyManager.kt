@@ -41,6 +41,15 @@ class AdbKeyManager(context: Context) {
         /** Certificate validity end (2031-12-31), matching the usual Android self-signed cert. */
         private const val NOT_AFTER_MILLIS = 1956528000_000L
 
+        /** Set once [importPrivateKey] succeeded, so the UI can say where the identity came from. */
+        private const val KEY_IMPORTED = "imported"
+
+        /** Captures the base64 body of a PEM block, tolerating CRLF and surrounding text. */
+        private val PEM_BLOCK = Regex(
+            "-----BEGIN [A-Z ]*PRIVATE KEY-----(.*?)-----END [A-Z ]*PRIVATE KEY-----",
+            RegexOption.DOT_MATCHES_ALL,
+        )
+
         /**
          * Whether a key pair was generated before (i.e. a pairing was attempted at least once).
          * Used to try a silent direct connection after the "paired" flag was introduced.
@@ -166,15 +175,4 @@ class AdbKeyManager(context: Context) {
 
     /** Whether the identity in use was imported instead of generated on this device. */
     fun isImported(): Boolean = preferences.getBoolean(KEY_IMPORTED, false)
-
-    private companion object {
-        /** Captures the base64 body of a PEM block, tolerating CRLF and surrounding text. */
-        val PEM_BLOCK = Regex(
-            "-----BEGIN [A-Z ]*PRIVATE KEY-----(.*?)-----END [A-Z ]*PRIVATE KEY-----",
-            RegexOption.DOT_MATCHES_ALL,
-        )
-
-        /** Set once [importPrivateKey] succeeded, so the UI can say where the identity came from. */
-        const val KEY_IMPORTED = "imported"
-    }
 }

@@ -30,8 +30,8 @@ object RootShell {
         manager: AbsAdbConnectionManager,
         command: String,
         timeoutMs: Long = 60_000,
-        onLine: (String) -> Unit = {},
         cacheDirectory: File? = null,
+        onLine: (String) -> Unit = {},
     ): String {
         AdbShell.exec(manager, "rm -f $CMD $OUT $DONE")
         AdbShell.stage(manager, CMD, command.toByteArray(), cacheDirectory, "stage-cmd.sh")

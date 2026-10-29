@@ -14,6 +14,8 @@
 #include "endpoint.h"
 #include "node.h"
 #include "target_profile.h"
+#include "pending_node.h"
+#include "realloc.h"
 
 /*
  * Create a vulnerable dangling node within the binder transaction.

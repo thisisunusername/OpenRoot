@@ -33,4 +33,9 @@ pthread_t pending_node_create(struct binder_state *bs, uint64_t node);
 // Called from endpoint.c. Without this prototype the compiler assumed an int return and passed
 // the pthread_t as an int, which truncates the handle on arm64.
 void terminate_pending_node(pthread_t th);
+// Called from node.c, same story: uint64_t arguments were being passed as int.
+void pending_node_free(struct binder_state *bs, uint64_t node, uint64_t vma_start, uint32_t strong, uint32_t weak, bool second);
+void pending_node_terminate(struct binder_state *bs, uint64_t handle, pthread_t th);
+void pending_node_write8(pthread_t th);
+void pending_node_leak(pthread_t th, uint64_t *q1, uint64_t *q2);
 #endif /*! PENDING_NODE_H_ */

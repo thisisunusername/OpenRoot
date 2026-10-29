@@ -12,6 +12,7 @@
 #include "binder.h"
 #include "endpoint.h"
 #include "pending_node.h"
+#include "exploit.h"
 
 static struct pending_node *pending_nodes = NULL;
 static uint64_t last_node_th = 0;

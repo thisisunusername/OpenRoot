@@ -17,11 +17,11 @@
  */
 #include "offset_dump.h"
 #include "target_profile.h"
-
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* Symbols the exploit needs, with the key each one is written under. */
 static const struct {

@@ -7,6 +7,8 @@
 void *realloc_thread(void *args);
 void spawn_realloc_threads();
 void cleanup_realloc_threads();
+void reset_realloc_threads();
+void realloc_barrier_wait(void);
 void setup_realloc_buffer(void *content, size_t size);
 bool discard_realloc_thread(pid_t pid);
 

@@ -25,9 +25,23 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    # The native payloads are committed prebuilt in app/src/main/jniLibs/arm64-v8a (extracted
-    # from the published release APK), so no NDK is installed. Set OPENROOT_BUILD_NATIVE=1 and
-    # add the nttld/setup-ndk step back if you want them compiled from source instead.
+    # The payloads are compiled here rather than taken from the repo: the binder engine
+    # (CVE-2020-0041) is new and has no committed binary yet, and building all of them keeps the
+    # APK honest about what the sources in this tree produce.
+    - name: Set up NDK
+      uses: nttld/setup-ndk@v1
+      id: ndk
+      with:
+        ndk-version: r27c
+        add-to-path: false
+
+    # OPENROOT_BUILD_NATIVE turns the native Makefile/ndk-build tasks on; ANDROID_NDK_HOME is the
+    # first path build.gradle.kts looks at after local.properties.
+    - name: Enable native payload builds
+      run: |
+        echo "OPENROOT_BUILD_NATIVE=1" >> $GITHUB_ENV
+        echo "ANDROID_NDK_HOME=${{ steps.ndk.outputs.ndk-path }}" >> $GITHUB_ENV
+        echo "NDK_ROOT=${{ steps.ndk.outputs.ndk-path }}" >> $GITHUB_ENV
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew

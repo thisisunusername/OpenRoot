@@ -99,7 +99,18 @@ val ndkPrebuilt: String = when {
     else -> "linux-x86_64"
 }
 val ndkBinDir: String = "$ndkDir/toolchains/llvm/prebuilt/$ndkPrebuilt/bin"
-val ndkMake: String = "$ndkDir/prebuilt/$ndkPrebuilt/bin/${if (ndkPrebuilt == "windows-x86_64") "make.exe" else "make"}"
+
+/**
+ * `make` to drive the payload Makefiles.
+ *
+ * The NDK shipped its own copy under `prebuilt/<host>/bin` until r23 and Google removed it, so a
+ * current NDK has no make at all. Use the bundled one when it is there and otherwise the host's,
+ * which every Linux and macOS runner has and which ships with the Windows image as well.
+ */
+val ndkMake: String = run {
+    val bundled = "$ndkDir/prebuilt/$ndkPrebuilt/bin/${if (ndkPrebuilt == "windows-x86_64") "make.exe" else "make"}"
+    if (File(bundled).isFile) bundled else "make"
+}
 val ndkStrip: String = "$ndkBinDir/${if (ndkPrebuilt == "windows-x86_64") "llvm-strip.exe" else "llvm-strip"}"
 
 val jniLibsDir = layout.projectDirectory.dir("src/main/jniLibs/arm64-v8a")

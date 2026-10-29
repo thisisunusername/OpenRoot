@@ -51,9 +51,6 @@ object GhostLockWire {
      */
     private class SectionSpec(val name: String, val keys: List<String>)
 
-    /** Path of a key inside the parsed profile. `null` marks an optional profile field. */
-    private class FieldSpec(val section: String, val key: String, val path: List<String>)
-
     /** `meta`. */
     private val META = SectionSpec(
         "meta",
@@ -169,7 +166,7 @@ object GhostLockWire {
      * document, because the exploit would read kernel memory at a wrong offset.
      */
     fun encode(profile: String, release: String): ByteArray? {
-        val parsed = HoconParser.parse(profile)
+        val parsed = Hocon.parse(profile)
         val route = routeOf(parsed) ?: return null
         val sections = mutableListOf<Pair<SectionSpec, Map<String, Long>>>()
 

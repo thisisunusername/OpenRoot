@@ -31,6 +31,7 @@ import com.hexo141.liquidglass.consent.ConsentStore
 import com.hexo141.liquidglass.device.DeviceInfo
 import com.hexo141.liquidglass.root.DirtyFragRunner
 import com.hexo141.liquidglass.root.ExploitMemory
+import com.hexo141.liquidglass.root.GhostLockRunner
 import com.hexo141.liquidglass.root.GpuRunner
 import com.hexo141.liquidglass.root.KsuManager
 import com.hexo141.liquidglass.root.PctRunner

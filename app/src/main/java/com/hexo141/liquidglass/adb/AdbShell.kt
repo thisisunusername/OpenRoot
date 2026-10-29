@@ -177,13 +177,21 @@ object AdbShell {
 
             if (relay != null && relay.length() == bytes.size.toLong()) {
                 onLine("$ cat ${relay.absolutePath} > $remotePath")
-                AdbShell.exec(
+                // `cat` is an external command: when it cannot be found or its source is
+                // unreadable, the redirection has already created (and truncated) the target, so
+                // the file exists but is empty and every later step fails for the wrong reason.
+                // Checking the size here turns that into one clear line instead.
+                val report = AdbShell.exec(
                     manager,
-                    "rm -f $remotePath; cat '${relay.absolutePath}' > '$remotePath'",
+                    "rm -f '$remotePath'; cat '${relay.absolutePath}' > '$remotePath' 2>&1; " +
+                        "echo \"rc=\$?\"; ls -l '$remotePath' 2>&1",
                     timeoutMs = 120_000,
-                )
+                ).trim()
                 // Leave nothing behind on shared storage once the copy is done.
                 runCatching { relay.delete() }
+                if (report.isNotEmpty() && !report.startsWith("rc=0")) {
+                    onLine("<e> relay copy reported: ${report.replace('\n', ' ')}")
+                }
                 return "relay"
             }
         }
@@ -225,6 +233,36 @@ object AdbShell {
         fun stop() {
             thread.interrupt()
         }
+    }
+
+    /**
+     * Sets [mode] on [remotePath] and confirms the kernel actually accepted it.
+     *
+     * Every engine runs its payload with `./name`, so a `chmod` that silently did nothing leaves a
+     * file with the right bytes and the wrong permissions, and the failure only surfaces much later
+     * as a vague "cannot run" or as `sh: ./payload: Permission denied`. Asking `stat` for the result
+     * costs one extra round trip and turns that into a precise message.
+     *
+     * @param mode octal string, e.g. `"755"`
+     * @return the permissions as reported afterwards, or `null` when they could not be read
+     */
+    @Throws(Exception::class)
+    fun chmod(
+        manager: AbsAdbConnectionManager,
+        remotePath: String,
+        mode: String,
+    ): String? {
+        val report = exec(
+            manager,
+            "chmod $mode '$remotePath' 2>&1; echo \"rc=\$?\"; " +
+                "stat -c '%a' '$remotePath' 2>/dev/null || ls -l '$remotePath' 2>&1",
+            timeoutMs = 30_000,
+        ).trim()
+        // The first line that is not the `rc=` marker is either the octal mode from `stat`, or the
+        // `ls -l` listing (or an error) when `stat` is unavailable on this build.
+        return report.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotEmpty() && !it.startsWith("rc=") }
     }
 
     /** Opens a shell service, falling back to a plain pipe when the daemon rejects the pty flag. */

@@ -129,7 +129,7 @@ object GpuRunner {
         )
         onProgress(0.2f)
         onLine("$ chmod 755 $STAGE_DIR/${payload.asset}")
-        AdbShell.exec(manager, "chmod 755 $STAGE_DIR/${payload.asset}")
+        AdbShell.chmod(manager, "$STAGE_DIR/${payload.asset}", "755")
 
         // The exploit re-execs this path as uid 0 once __do_sys_capset is restored.
         AdbShell.stage(
@@ -142,7 +142,7 @@ object GpuRunner {
         )
         onProgress(0.3f)
         onLine("$ chmod 755 $STAGE_DIR/$BOOTSTRAP_REMOTE")
-        AdbShell.exec(manager, "chmod 755 $STAGE_DIR/$BOOTSTRAP_REMOTE")
+        AdbShell.chmod(manager, "$STAGE_DIR/$BOOTSTRAP_REMOTE", "755")
 
         // Same preference contract the page-cache engine uses; "none" selects the root channel.
         val managerValue = suManager?.packageName.orEmpty().ifEmpty { "none" }
@@ -163,7 +163,7 @@ object GpuRunner {
             onLine,
         )
         onProgress(0.38f)
-        AdbShell.exec(manager, "chmod 644 $STAGE_DIR/openroot.xml")
+        AdbShell.chmod(manager, "$STAGE_DIR/openroot.xml", "644")
 
         if (suManager != null) {
             // Two ways to get ksud on the device: keep one an earlier run already staged, or read
@@ -192,7 +192,7 @@ object GpuRunner {
                     onLine,
                 )
                 onLine("$ chmod 755 $STAGE_DIR/ksud")
-                AdbShell.exec(manager, "chmod 755 $STAGE_DIR/ksud")
+                AdbShell.chmod(manager, "$STAGE_DIR/ksud", "755")
                 onProgress(0.46f)
 
                 val staged = AdbShell.exec(
@@ -235,14 +235,15 @@ object GpuRunner {
     ): String {
         val report = StringBuilder("<e> staging failed, diagnostics:")
         val commands = listOf(
-            "ls -l $STAGE_DIR/ksud",
-            "ls -ld $STAGE_DIR",
+            "echo \"PATH=\$PATH\"",
+            "command -v cat chmod ls rm",
+            "ls -l $STAGE_DIR/ksud 2>&1",
+            "ls -ld $STAGE_DIR 2>&1",
             "id",
-            "which cp cat chmod sh",
         )
         for (command in commands) {
-            val result = runCatching { AdbShell.exec(manager, "$command 2>&1") }
-                .getOrElse { error -> "<e> $command: ${error.message}" }
+            val result = runCatching { AdbShell.exec(manager, command) }
+                .getOrElse { error -> "<e> ${error.message}" }
             report.append('\n').append("$ ").append(command)
             report.append('\n').append(result.trim().ifEmpty { "(no output)" })
         }

@@ -246,7 +246,7 @@ object BinderBombRunner {
         )
         onProgress(0.18f)
         onLine("$ chmod 755 $REMOTE_DIR/$PAYLOAD_REMOTE")
-        AdbShell.exec(manager, "chmod 755 $REMOTE_DIR/$PAYLOAD_REMOTE")
+        AdbShell.chmod(manager, "$REMOTE_DIR/$PAYLOAD_REMOTE", "755")
 
         AdbShell.stage(
             manager,
@@ -258,7 +258,7 @@ object BinderBombRunner {
         )
         onProgress(0.28f)
         onLine("$ chmod 644 $REMOTE_DIR/$PROFILE_NAME")
-        AdbShell.exec(manager, "chmod 644 $REMOTE_DIR/$PROFILE_NAME")
+        AdbShell.chmod(manager, "$REMOTE_DIR/$PROFILE_NAME", "644")
 
         AdbShell.stage(
             manager,
@@ -270,7 +270,7 @@ object BinderBombRunner {
         )
         onProgress(0.36f)
         onLine("$ chmod 755 $REMOTE_DIR/$BOOTSTRAP_REMOTE")
-        AdbShell.exec(manager, "chmod 755 $REMOTE_DIR/$BOOTSTRAP_REMOTE")
+        AdbShell.chmod(manager, "$REMOTE_DIR/$BOOTSTRAP_REMOTE", "755")
 
         // Same preference contract the other engines use; "none" selects the root channel.
         val managerValue = suManager?.packageName.orEmpty().ifEmpty { "none" }
@@ -291,7 +291,7 @@ object BinderBombRunner {
             onLine,
         )
         onProgress(0.44f)
-        AdbShell.exec(manager, "chmod 644 $REMOTE_DIR/openroot.xml")
+        AdbShell.chmod(manager, "$REMOTE_DIR/openroot.xml", "644")
 
         if (suManager != null) {
             // Two ways to get ksud on the device: keep one an earlier run already staged, or read
@@ -317,7 +317,7 @@ object BinderBombRunner {
                     onLine,
                 )
                 onLine("$ chmod 755 $REMOTE_DIR/ksud")
-                AdbShell.exec(manager, "chmod 755 $REMOTE_DIR/ksud")
+                AdbShell.chmod(manager, "$REMOTE_DIR/ksud", "755")
                 onProgress(0.5f)
 
                 val staged = AdbShell.exec(

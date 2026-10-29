@@ -26,6 +26,23 @@ object ShizukuShell {
     /** `Shizuku.getUid()` value while the server runs as the shell user. */
     const val UID_SHELL = 2000
 
+    /**
+     * Environment handed to every `sh -c` child.
+     *
+     * `envp = null` happens to work on mksh because it falls back to a built-in PATH, but the
+     * payloads inherit whatever is here and several of them read `HOME` and `TMPDIR` before they
+     * have root. Declaring the values explicitly also keeps the child from inheriting anything from
+     * the Shizuku server that this app did not ask for.
+     */
+    private val ENV = arrayOf(
+        "PATH=/product/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin" +
+            ":/system_ext/bin:/system/bin:/system/xbin:/odm/bin:/vendor/bin:/vendor/xbin",
+        "ANDROID_ROOT=/system",
+        "ANDROID_DATA=/data",
+        "HOME=/data/local/tmp",
+        "TMPDIR=/data/local/tmp",
+    )
+
     /** Whatever state the Shizuku link is in, so the UI can say something useful. */
     enum class Status {
         /** The Shizuku app is not installed (or Sui is not available). */
@@ -113,10 +130,17 @@ object ShizukuShell {
      * The command always goes through `/system/bin/sh -c` so redirections, `;`, `&&` and `$?`
      * behave exactly like they do on an ADB `shell:` service.
      *
+     * The caller speaks the ADB service vocabulary, where `shell:cmd` means "run cmd". Shizuku has
+     * no service layer, so that prefix has to come off here - handing `shell:ls` to `sh` makes it
+     * look for a binary literally named `shell:ls` and report `inaccessible or not found`, which
+     * silently broke every diagnostic that used an external command while builtins (`test`, `echo`)
+     * kept working.
+     *
      * @throws IOException when Shizuku is not usable, so callers can treat it like a dead channel.
      */
     @Throws(IOException::class)
-    fun openStream(command: String): ShellStream {
+    fun openStream(destination: String): ShellStream {
+        val command = stripServicePrefix(destination)
         if (!isBinderAlive()) {
             throw IOException("Shizuku is not running; start it and grant this app access")
         }
@@ -129,7 +153,7 @@ object ShizukuShell {
 
         val process = try {
             @Suppress("DEPRECATION")
-            Shizuku.newProcess(arrayOf("/system/bin/sh", "-c", command), null, null)
+            Shizuku.newProcess(arrayOf("/system/bin/sh", "-c", command), null, ENV)
         } catch (e: IllegalStateException) {
             throw IOException("Shizuku binder is gone", e)
         } catch (e: RuntimeException) {
@@ -141,6 +165,19 @@ object ShizukuShell {
         }
         Log.d(TAG, "started (${describePrivilege()}): $command")
         return ShizukuStream(process, command)
+    }
+
+    /**
+     * Drops the ADB service prefix the callers use, so `shell:ls -l /tmp` becomes `ls -l /tmp`.
+     *
+     * Anything that is not a shell service is passed through untouched: a future caller asking for
+     * a different service should fail loudly when Shizuku cannot honour it rather than have its
+     * request quietly reinterpreted.
+     */
+    private fun stripServicePrefix(destination: String): String = when {
+        destination.startsWith("shell,pty:") -> destination.removePrefix("shell,pty:")
+        destination.startsWith("shell:") -> destination.removePrefix("shell:")
+        else -> destination
     }
 
     private fun isShizukuInstalled(): Boolean = try {

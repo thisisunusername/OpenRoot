@@ -211,7 +211,7 @@ object DirtyFragRunner {
         )
         onProgress(0.2f)
         onLine("$ chmod 755 $STAGE_DIR/$BOOTSTRAP_REMOTE")
-        AdbShell.exec(manager, "chmod 755 $STAGE_DIR/$BOOTSTRAP_REMOTE")
+        AdbShell.chmod(manager, "$STAGE_DIR/$BOOTSTRAP_REMOTE", "755")
 
         // The daemon reads its settings from here; values match the app's own toggles.
         val managerValue = if (mode == Mode.KERNEL_SU) suManager?.packageName.orEmpty() else "none"
@@ -232,7 +232,7 @@ object DirtyFragRunner {
             onLine,
         )
         onProgress(0.3f)
-        AdbShell.exec(manager, "chmod 644 $STAGE_DIR/openroot.xml")
+        AdbShell.chmod(manager, "$STAGE_DIR/openroot.xml", "644")
 
         // libksud.so lives in the manager's native library dir, which the shell user cannot read.
         // This app can, so the bytes go into its external cache and the shell copies that file.
@@ -258,7 +258,7 @@ object DirtyFragRunner {
                         onLine,
                     )
                     onLine("$ chmod 755 $STAGE_DIR/ksud")
-                    AdbShell.exec(manager, "chmod 755 $STAGE_DIR/ksud")
+                    AdbShell.chmod(manager, "$STAGE_DIR/ksud", "755")
                 }
                 onProgress(0.38f)
                 val staged = AdbShell.exec(

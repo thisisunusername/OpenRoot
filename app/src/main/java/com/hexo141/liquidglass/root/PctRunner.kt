@@ -115,7 +115,7 @@ object PctRunner {
         onProgress(0.12f)
         // 777 on purpose: the upstream tool documents that 755 is refused on this build.
         onLine("$ chmod 777 $STAGE_DIR/${payload.asset}")
-        AdbShell.exec(manager, "chmod 777 $STAGE_DIR/${payload.asset}")
+        AdbShell.chmod(manager, "$STAGE_DIR/${payload.asset}", "777")
         AdbShell.stage(
             manager,
             "$STAGE_DIR/$BOOTSTRAP_REMOTE",
@@ -126,7 +126,7 @@ object PctRunner {
         )
         onProgress(0.2f)
         onLine("$ chmod 755 $STAGE_DIR/$BOOTSTRAP_REMOTE")
-        AdbShell.exec(manager, "chmod 755 $STAGE_DIR/$BOOTSTRAP_REMOTE")
+        AdbShell.chmod(manager, "$STAGE_DIR/$BOOTSTRAP_REMOTE", "755")
 
         // Same preference contract the page cache and GPU engines use; "none" keeps a root
         // command channel instead of late-loading a manager.
@@ -148,7 +148,7 @@ object PctRunner {
             onLine,
         )
         onProgress(0.26f)
-        AdbShell.exec(manager, "chmod 644 $STAGE_DIR/openroot.xml")
+        AdbShell.chmod(manager, "$STAGE_DIR/openroot.xml", "644")
 
         if (suManager != null) {
             // Keep a ksud an earlier run already staged, otherwise read the manager's library from
@@ -176,7 +176,7 @@ object PctRunner {
                     onLine,
                 )
                 onLine("$ chmod 755 $STAGE_DIR/ksud")
-                AdbShell.exec(manager, "chmod 755 $STAGE_DIR/ksud")
+                AdbShell.chmod(manager, "$STAGE_DIR/ksud", "755")
                 onProgress(0.32f)
                 val staged = AdbShell.exec(
                     manager,

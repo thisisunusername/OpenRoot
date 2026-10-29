@@ -33,6 +33,18 @@ object AdbShell {
     private const val IDLE_TIMEOUT_MS = 15_000L
 
     /**
+     * How many times a command is re-issued when its channel came back empty.
+     *
+     * Shizuku starts one `sh` per channel and answers `null` when it is busy; the channel then
+     * closes before the command line is ever read. That is a lost request, not a refusal, so the
+     * same request is simply sent again.
+     */
+    private const val EXEC_ATTEMPTS = 4
+
+    /** Base delay before re-issuing a command, multiplied by the attempt number. */
+    private const val EXEC_RETRY_DELAY_MS = 200L
+
+    /**
      * @param command command line, executed by the daemon's shell (`shell:<command>`)
      * @param timeoutMs how long the command may stay silent before the stream is closed
      * @return everything the command wrote to stdout, decoded as UTF-8
@@ -43,7 +55,66 @@ object AdbShell {
         command: String,
         timeoutMs: Long = IDLE_TIMEOUT_MS,
     ): String {
-        val stream = manager.openStream("shell:$command")
+        // Only the output matters here; callers that need the status use [execChecked].
+        return execChecked(manager, command, timeoutMs).output
+    }
+
+    /** What a shell command did: its stdout and the status the shell actually reported. */
+    data class Result(
+        val output: String,
+        val exitCode: Int,
+    ) {
+        /** The status the transport reports when the command never ran at all. */
+        val ran get() = exitCode != NEVER_RAN
+
+        companion object {
+            /**
+             * Returned when the channel carried no marker, i.e. the command's line never reached a
+             * shell. Shizuku answers a start request with `null` under load, and the transport then
+             * closes the channel without a byte, which used to look exactly like success.
+             */
+            const val NEVER_RAN = -1
+        }
+    }
+
+    /**
+     * Runs [command] and reports both its output and its exit status.
+     *
+     * The status is echoed as [EXIT_MARKER] plus `$?` so a channel that dies early is visible: with
+     * no marker there was no shell, and that is a failure even though stdout is empty and nothing
+     * threw. `exec` alone cannot tell those apart, which is how a stage step reported success while
+     * every file it wrote stayed at 0 bytes.
+     */
+    @Throws(Exception::class)
+    fun execChecked(
+        manager: AbsAdbConnectionManager,
+        command: String,
+        timeoutMs: Long = IDLE_TIMEOUT_MS,
+    ): Result {
+        var last = Result("", Result.NEVER_RAN)
+        repeat(EXEC_ATTEMPTS) { attempt ->
+            if (attempt > 0) {
+                // The empty channel is a race, not a refusal: retrying the same request usually
+                // gets a process. Waiting turns two failures in a row from rare into vanishing.
+                try {
+                    Thread.sleep(EXEC_RETRY_DELAY_MS * attempt)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return last
+                }
+            }
+            last = execOnce(manager, command, timeoutMs)
+            if (last.ran) return last
+        }
+        return last
+    }
+
+    private fun execOnce(
+        manager: AbsAdbConnectionManager,
+        command: String,
+        timeoutMs: Long,
+    ): Result {
+        val stream = manager.openStream("shell:$command; echo \"$EXIT_MARKER\$?\"")
         val watchdog = StreamWatchdog(stream, timeoutMs)
         try {
             val out = ByteArrayOutputStream()
@@ -59,7 +130,13 @@ object AdbShell {
                 if (read <= 0) break
                 out.write(buffer, 0, read)
             }
-            return out.toString("UTF-8")
+            val text = out.toString("UTF-8")
+            val markerAt = text.lastIndexOf(EXIT_MARKER)
+            if (markerAt < 0) return Result(text, Result.NEVER_RAN)
+            val status = text.substring(markerAt + EXIT_MARKER.length)
+                .trim()
+                .toIntOrNull() ?: Result.NEVER_RAN
+            return Result(text.substring(0, markerAt).removeSuffix("\r"), status)
         } finally {
             watchdog.stop()
             runCatching { stream.close() }
@@ -205,16 +282,33 @@ object AdbShell {
                 // unreadable, the redirection has already created (and truncated) the target, so
                 // the file exists but is empty and every later step fails for the wrong reason.
                 // Checking the size here turns that into one clear line instead.
-                val report = AdbShell.exec(
+                val report = AdbShell.execChecked(
                     manager,
                     "rm -f '$remotePath'; cat '${relay.absolutePath}' > '$remotePath' 2>&1; " +
                         "echo \"rc=\$?\"; ls -l '$remotePath' 2>&1",
                     timeoutMs = 120_000,
-                ).trim()
+                )
                 // Leave nothing behind on shared storage once the copy is done.
                 runCatching { relay.delete() }
-                if (report.isNotEmpty() && !report.startsWith("rc=0")) {
-                    onLine("<e> relay copy reported: ${report.replace('\n', ' ')}")
+                if (!report.ran) {
+                    throw IOException(
+                        "the shell never ran while copying to $remotePath " +
+                            "(the transport dropped the channel before a status came back)",
+                    )
+                }
+                val copied = runCatching {
+                    AdbShell.execChecked(
+                        manager,
+                        "wc -c < '$remotePath' 2>&1",
+                        timeoutMs = 30_000,
+                    )
+                }.getOrNull()
+                val copiedSize = copied?.output?.trim()?.toLongOrNull()
+                if (copied?.ran != true || copiedSize != bytes.size.toLong()) {
+                    throw IOException(
+                        "copying to $remotePath produced ${copiedSize ?: "?"} of " +
+                            "${bytes.size} bytes: ${report.output.trim().replace('\n', ' ')}",
+                    )
                 }
                 return "relay"
             }

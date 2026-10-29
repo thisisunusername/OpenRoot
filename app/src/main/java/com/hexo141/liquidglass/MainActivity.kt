@@ -110,6 +110,9 @@ class MainActivity : AppCompatActivity() {
     /** Mirrors [ShizukuShell.status] so the screen can swap the pairing button for a grant button. */
     private val shizukuStatus = mutableStateOf(ShizukuShell.Status.NOT_INSTALLED)
 
+    /** The endpoint typed in the manual field, or `null` before one worked. */
+    private val manualEndpoint = mutableStateOf<String?>(null)
+
     /** Device info: local props first, replaced by the values read over ADB once connected. */
     private val deviceInfo = mutableStateOf<DeviceInfo?>(null)
 
@@ -294,6 +297,8 @@ class MainActivity : AppCompatActivity() {
                                 exploitChoices = exploitChoices.value,
                                 pickerVisible = pickerVisible.value,
                                 backdrop = backdrop,
+                                manualEndpoint = manualEndpoint.value,
+                                onManualConnect = ::connectManual,
                                 onToggle = ::onPrimaryAction,
                                 onExploit = ::openEnginePicker,
                                 onPickEngine = ::startExploit,
@@ -454,6 +459,9 @@ class MainActivity : AppCompatActivity() {
         val wasPaired = paired.value
         val isPaired = PairingState(this).isPaired
         paired.value = isPaired
+        if (manualEndpoint.value == null) {
+            manualEndpoint.value = PairingState(this).manualEndpoint
+        }
         val isConnected = AdbConnectionManager.isConnected()
         connected.value = isConnected
         if (!isConnected) {
@@ -476,6 +484,40 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------------ actions
+
+    /**
+     * Connects to an endpoint the user typed, skipping discovery.
+     *
+     * Runs off the main thread because the handshake blocks, and reports the failure inline: the
+     * usual reason is a port that is not listening, and a toast that names the address says that
+     * in one line.
+     */
+    private fun connectManual(endpoint: String) {
+        if (connecting.value || connected.value) return
+        connecting.value = true
+        Thread({
+            val outcome = runCatching {
+                AdbConnectionManager.get(this).connectManual(this, endpoint)
+            }
+            runOnUiThread {
+                connecting.value = false
+                if (outcome.getOrNull() == true) {
+                    connected.value = true
+                    manualEndpoint.value = endpoint
+                    // A manual connection needs no pairing code either, so the flag is set the same
+                    // way a Shizuku connection sets it.
+                    paired.value = true
+                    PairingState(this).markPaired()
+                    supportState.value = SupportState.Checking
+                    Log.i(TAG, "connected manually to $endpoint")
+                    loadDeviceInfo()
+                } else {
+                    Log.w(TAG, "manual connect to $endpoint failed", outcome.exceptionOrNull())
+                    toast(getString(R.string.adb_manual_failed, endpoint))
+                }
+            }
+        }, "adb-manual-connect").start()
+    }
 
     /**
      * Connect directly when the device is already paired instead of asking for a code again; only a

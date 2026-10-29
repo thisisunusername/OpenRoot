@@ -33,6 +33,18 @@ class PairingState(context: Context) {
             .apply()
     }
 
+    /**
+     * The `host:port` the user typed in, or `null` when discovery was used.
+     *
+     * Kept because mDNS discovery finds nothing on a device without a wireless-debugging entry,
+     * and reconnecting would otherwise fall back to the search that already failed.
+     */
+    var manualEndpoint: String?
+        get() = preferences.getString(KEY_MANUAL_ENDPOINT, null)
+        set(value) {
+            preferences.edit().putString(KEY_MANUAL_ENDPOINT, value).apply()
+        }
+
     companion object {
         /** Exposed so the activity can register a change listener on the same file. */
         const val PREF_NAME = "adb_pairing_state"
@@ -42,5 +54,8 @@ class PairingState(context: Context) {
 
         /** Written on every successful pairing, even if [KEY_PAIRED] was already true. */
         const val KEY_PAIRED_AT = "paired_at"
+
+        /** The `host:port` the user typed in, when discovery was not used. */
+        const val KEY_MANUAL_ENDPOINT = "manual_endpoint"
     }
 }

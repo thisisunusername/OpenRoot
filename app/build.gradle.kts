@@ -13,9 +13,45 @@ plugins {
 val buildDate: String = System.getenv("DATE")
     ?.takeIf { it.matches(Regex("""\d{8}""")) }
     ?: LocalDate.now(ZoneId.of("Asia/Shanghai")).format(DateTimeFormatter.BASIC_ISO_DATE)
-
 android {
     namespace = "com.hexo141.liquidglass"
+
+    /**
+     * A fixed release key, so every CI build has the same signature and installs over the previous
+     * one.
+     *
+     * Without this AGP signs with `~/.android/debug.keystore`, which is generated fresh on each CI
+     * runner: the certificate changes with the runner, Android refuses the update, and the only
+     * way to install is to uninstall first and lose all app data.
+     *
+     * The key never enters the repository. CI writes it from a secret into
+     * `$RUNNER_TEMP/release.jks` and passes the three environment variables below; a local build
+     * without them falls back to the debug key rather than failing.
+     */
+    val releaseStoreFile: String? = System.getenv("OPENROOT_KEYSTORE")
+    val releaseStorePassword: String? = System.getenv("OPENROOT_KEYSTORE_PASSWORD")
+    val releaseKeyAlias: String? = System.getenv("OPENROOT_KEY_ALIAS")
+    val releaseKeyPassword: String? = System.getenv("OPENROOT_KEY_PASSWORD")
+    val hasReleaseKey = releaseStoreFile != null &&
+        releaseStorePassword != null &&
+        releaseKeyAlias != null &&
+        releaseKeyPassword != null
+
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                // v1 stays on for API 24-27, which ignore v2.
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -37,6 +73,11 @@ android {
         release {
             optimization {
                 enable = false
+            }
+            // Use the fixed key when CI provided one; otherwise the build stays on the debug key so
+            // a local `assembleRelease` still produces something installable.
+            if (hasReleaseKey) {
+                signingConfig = signingConfigs.getByName("release")
             }
         }
     }

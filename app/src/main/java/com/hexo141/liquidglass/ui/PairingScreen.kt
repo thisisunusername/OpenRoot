@@ -396,7 +396,7 @@ private fun ManualEndpointField(
         ) {
             BasicText(
                 text = stringResource(R.string.adb_manual_connect),
-                style = buttonTextStyle(),
+                style = buttonTextStyle()
             )
         }
     }

@@ -53,17 +53,41 @@ jobs:
         echo "DATE=$DATE" >> $GITHUB_ENV
         echo "VERSION=v$DATE" >> $GITHUB_ENV
 
-    # 2. Build a debug APK. It is signed with the standard debug key, so it installs on any
-    #    device without creating a keystore or adding repository secrets.
-    - name: Build Debug APK
-      run: ./gradlew :app:assembleDebug --stacktrace
+    # 2. Write the release key so every build has one fixed signature. The key is a base64
+    #    secret and is written to $RUNNER_TEMP, never into the checkout, so it cannot leak
+    #    through an artifact or a commit.
+    - name: Prepare signing key
+      env:
+        KEYSTORE_BASE64: ${{ secrets.OPENROOT_KEYSTORE_BASE64 }}
+        KEYSTORE_PASSWORD: ${{ secrets.OPENROOT_KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.OPENROOT_KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.OPENROOT_KEY_PASSWORD }}
+      run: |
+        if [ -z "$KEYSTORE_BASE64" ]; then
+          echo "::warning::No signing key configured; this build will use a throwaway debug key and will not install over an earlier one."
+          exit 0
+        fi
+        echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+        {
+          echo "OPENROOT_KEYSTORE=$RUNNER_TEMP/release.jks"
+          echo "OPENROOT_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+          echo "OPENROOT_KEY_ALIAS=$KEY_ALIAS"
+          echo "OPENROOT_KEY_PASSWORD=$KEY_PASSWORD"
+        } >> "$GITHUB_ENV"
 
-    # 3. Rename so the artifact always carries the build date
+    # 3. Build the release variant: the debug variant always uses a locally generated throwaway
+    #    key, so its certificate changes on every runner and Android refuses to update over it.
+    - name: Build Release APK
+      run: ./gradlew :app:assembleRelease --stacktrace
+
+    # 4. Rename so the artifact always carries the build date
     - name: Rename APK
       run: |
         mkdir -p dist
-        cp app/build/outputs/apk/debug/app-debug.apk "dist/OpenRoot-shizuku-$VERSION.apk"
+        cp app/build/outputs/apk/release/app-release.apk "dist/OpenRoot-shizuku-$VERSION.apk"
         ls -la dist/
+        echo "=== certificate subject of the produced APK ==="
+        "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "dist/OpenRoot-shizuku-$VERSION.apk" | head -5 || true
 
     # 4. Always keep the APK, whether or not a release is created
     - name: Upload APK

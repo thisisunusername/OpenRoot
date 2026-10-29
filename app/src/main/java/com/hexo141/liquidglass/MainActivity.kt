@@ -493,6 +493,9 @@ class MainActivity : AppCompatActivity() {
      * in one line.
      */
     private fun connectManual(endpoint: String) {
+        // Echo the tap: this device drops third-party logs, so without a visible marker a silent
+        // `return` below is indistinguishable from a tap that never arrived.
+        Toast.makeText(this, "connecting to $endpoint…", Toast.LENGTH_SHORT).show()
         if (connecting.value || connected.value) return
         connecting.value = true
         Thread({
@@ -512,11 +515,19 @@ class MainActivity : AppCompatActivity() {
                     Log.i(TAG, "connected manually to $endpoint")
                     loadDeviceInfo()
                 } else {
-                    Log.w(TAG, "manual connect to $endpoint failed", outcome.exceptionOrNull())
+                    // The reason has to reach the user: this device filters third-party logs, so a
+                    // message that only exists in logcat is invisible. The exception type and its
+                    // message distinguish a closed port from a rejected key.
+                    val reason = outcome.exceptionOrNull()
+                    val detail = when (val e = reason) {
+                        null -> "returned false"
+                        else -> "${e.javaClass.simpleName}: ${e.message ?: "no message"}"
+                    }
+                    Log.w(TAG, "manual connect to $endpoint failed: $detail", reason)
                     Toast.makeText(
                         this,
-                        getString(R.string.adb_manual_failed, endpoint),
-                        Toast.LENGTH_SHORT,
+                        "$endpoint -> $detail",
+                        Toast.LENGTH_LONG,
                     ).show()
                 }
             }

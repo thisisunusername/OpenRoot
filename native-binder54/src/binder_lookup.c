@@ -325,7 +325,9 @@ hidl_vec * create_token(struct binder_state *bs, uint64_t tm_handle, uint64_t my
 
    //Should check for BINDER_TYPE_PTR
 
-   memcpy(vec, bbo->buffer, sizeof(*vec));
+   /* bbo->buffer is a binder_uintptr_t, not a pointer, and bionic's fortified memcpy refuses the
+    * implicit conversion the plain libc one allowed. */
+   memcpy(vec, (const void *)(uintptr_t)bbo->buffer, sizeof(*vec));
 
    /* Allocate the vec data. */
    void *data = malloc(vec->size);

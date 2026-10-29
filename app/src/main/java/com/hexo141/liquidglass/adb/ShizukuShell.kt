@@ -206,8 +206,12 @@ object ShizukuShell {
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
         try {
-            // The wrapper writes the interface token and the transaction code itself, so `data`
-            // carries only the AIDL arguments.
+            // Two interface tokens are involved. `ShizukuBinderWrapper` writes the outer one, which
+            // is how the server knows the transaction is a `transactRemote` request. The inner one
+            // is written here: the server re-dispatches `data` to the wrapped binder, and that
+            // binder's `onTransact` starts with `enforceInterface`, so without this line it fails
+            // with "Binder invocation to an incorrect interface".
+            data.writeInterfaceToken(SHIZUKU_DESCRIPTOR)
             data.writeStringArray(cmd)
             data.writeStringArray(env)
             data.writeString(dir)
@@ -243,6 +247,14 @@ object ShizukuShell {
             parcel.recycle()
         }
     }
+
+    /**
+     * Descriptor `IShizukuService` checks on every transaction it receives.
+     *
+     * It is needed twice over: once by [ShizukuBinderWrapper] for the outer request, and once inside
+     * [startProcess] for the arguments the server re-dispatches to `newProcess`.
+     */
+    private const val SHIZUKU_DESCRIPTOR = "moe.shizuku.server.IShizukuService"
 
     /** `IRemoteProcess newProcess(in String[] cmd, in String[] env, in String dir) = 7`. */
     private const val TRANSACTION_NEW_PROCESS = 7

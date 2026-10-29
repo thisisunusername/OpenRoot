@@ -96,7 +96,11 @@ fun PairingScreen(
     val shizukuUsable = shizukuStatus == ShizukuShell.Status.READY ||
         shizukuStatus == ShizukuShell.Status.PERMISSION_REQUIRED
     // Hidden once paired; only a failed direct connect (needsPairing) brings it back.
-    val showPairingButton = (!paired || needsPairing) && !shizukuUsable
+    // UNUSABLE overrides "paired": a Shizuku connection marks the app paired because it needs no
+    // code, so leaving the flag in charge would hide the only route that still works.
+    val showPairingButton = (shizukuStatus == ShizukuShell.Status.UNUSABLE ||
+        !paired ||
+        needsPairing) && !shizukuUsable
 
     val statusText = when {
         connecting -> "Connecting…"

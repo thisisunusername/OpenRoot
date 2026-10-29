@@ -159,11 +159,17 @@ object ShizukuShell {
         val process = try {
             startProcess(arrayOf("/system/bin/sh", "-c", command))
         } catch (e: RemoteException) {
-            throw IOException("Shizuku refused to start a process", e)
+            throw IOException("Shizuku refused to start a process: ${e.message}", e)
         } catch (e: IllegalStateException) {
-            throw IOException("Shizuku binder is gone", e)
+            throw IOException("Shizuku binder is gone: ${e.message}", e)
         } catch (e: RuntimeException) {
-            throw IOException("Shizuku could not start the process", e)
+            // Shizuku wraps a server-side SecurityException or IllegalStateException in a plain
+            // RuntimeException, so `e.message` alone just says "java.lang.SecurityException" with no
+            // detail. The cause carries the sentence that says which check failed.
+            val cause = e.cause
+            val detail = cause?.let { "${it::class.java.simpleName}: ${it.message}" }
+                ?: e.message
+            throw IOException("Shizuku could not start the process: $detail", e)
         }
 
         Log.d(TAG, "started (${describePrivilege()}): $command")

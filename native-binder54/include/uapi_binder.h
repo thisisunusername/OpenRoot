@@ -24,6 +24,13 @@
 #include <linux/ioctl.h>
 #include <unistd.h>
 
+// bionic does not define the kernel's __packed: it lives in <linux/stddef.h>, which the NDK
+// sysroot does not ship. One struct below uses it, so the spelling is defined here instead of
+// pulling in a header that would bring a conflicting copy of everything else.
+#ifndef __packed
+#define __packed __attribute__((packed))
+#endif
+
 #define B_PACK_CHARS(c1, c2, c3, c4) \
 	((((c1)<<24)) | (((c2)<<16)) | (((c3)<<8)) | (c4))
 #define B_TYPE_LARGE 0x85

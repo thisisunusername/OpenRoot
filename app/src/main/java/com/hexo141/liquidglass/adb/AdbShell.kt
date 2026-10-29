@@ -12,12 +12,22 @@ object AdbShell {
      * Over ADB each write is answered with a READY before the next one goes out, so 32 KiB is free.
      * Over Shizuku the stream is an ordinary pipe with no acknowledgement: the writer races `cat`
      * for the pipe buffer, and a chunk the child cannot drain yet comes back as
-     * `write failed: EPIPE (Broken pipe)`. 8 KiB keeps the writer behind the reader.
+     * `write failed: EPIPE (Broken pipe)`. 8 KiB kept the writer behind the reader on stock
+     * Shizuku; 4 KiB leaves room for servers that size their pipe smaller still.
      */
-    private const val PUSH_CHUNK = 8 * 1024
+    private const val PUSH_CHUNK = 4 * 1024
 
     /** How many times [push] reopens the pipe after the child drops it mid-transfer. */
-    private const val PUSH_ATTEMPTS = 5
+    private const val PUSH_ATTEMPTS = 8
+
+    /**
+     * Base delay before a [push] retry, multiplied by the attempt number.
+     *
+     * A retry that starts immediately races the same cold start again and fails identically, which
+     * is what `EPIPE` on attempt one through five looked like on a server whose `sh` takes a while
+     * to exec `cat`.
+     */
+    private const val PUSH_RETRY_DELAY_MS = 250L
 
     /** A shell command that stops producing output for this long is treated as stuck. */
     private const val IDLE_TIMEOUT_MS = 15_000L
@@ -124,11 +134,25 @@ object AdbShell {
             val operator = if (offset == 0) ">" else ">>"
             val stream = manager.openStream("shell:cat $operator '$remotePath'")
             val startOfAttempt = offset
+            // A dropped channel is recoverable, but only if the retry waits. Shizuku starts `sh`
+            // in a fresh process per channel, and on a slower server the pipe is closed before the
+            // child has exec'd `cat` - the write then fails with EPIPE on the very first chunk no
+            // matter how small it is. Backing off before reopening gives that child time to run.
+            if (attempts > 0) {
+                try {
+                    Thread.sleep(PUSH_RETRY_DELAY_MS * attempts)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
             try {
                 while (offset < bytes.size) {
                     val length = minOf(PUSH_CHUNK, bytes.size - offset)
                     stream.write(bytes, offset, length)
                     offset += length
+                    // Yield between chunks: the writer shares a pipe with `cat`, and writing the next
+                    // chunk before `cat` drains the last one is what EPIPE means here.
+                    Thread.yield()
                 }
                 stream.flush()
                 stream.closeInput()

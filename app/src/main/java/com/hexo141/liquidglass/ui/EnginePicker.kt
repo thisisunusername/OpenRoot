@@ -12,10 +12,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -117,47 +120,58 @@ fun EnginePicker(
                 )
             )
             Spacer(Modifier.height(12.dp))
-            choices.forEach { choice ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(enabled = choice.enabled) { onPick(choice.id) }
-                        .padding(vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        BasicText(
-                            text = choice.title,
-                            style = TextStyle(
-                                color = Color.White.copy(alpha = if (choice.enabled) 1f else 0.45f),
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium,
-                                shadow = pickerShadow
+            // Every engine is listed, including the ones that cannot run, because the reason is the
+            // useful part. Five rows do not fit on a short screen, so the list scrolls inside a
+            // capped height while the title and Cancel stay put - otherwise the last rows sit below
+            // the fold with nothing hinting that they exist.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                choices.forEach { choice ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = choice.enabled) { onPick(choice.id) }
+                            .padding(vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            BasicText(
+                                text = choice.title,
+                                style = TextStyle(
+                                    color = Color.White.copy(alpha = if (choice.enabled) 1f else 0.45f),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    shadow = pickerShadow
+                                )
                             )
-                        )
-                        Spacer(Modifier.height(3.dp))
-                        BasicText(
-                            text = choice.detail,
-                            style = TextStyle(
-                                color = Color.White.copy(alpha = if (choice.enabled) 0.62f else 0.35f),
-                                fontSize = 11.sp,
-                                lineHeight = 15.sp,
-                                shadow = pickerShadow
+                            Spacer(Modifier.height(3.dp))
+                            BasicText(
+                                text = choice.detail,
+                                style = TextStyle(
+                                    color = Color.White.copy(alpha = if (choice.enabled) 0.62f else 0.35f),
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
+                                    shadow = pickerShadow
+                                )
                             )
-                        )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    if (choice.enabled) {
-                        PickerButton(text = "Run") { onPick(choice.id) }
-                    } else {
-                        BasicText(
-                            text = "Unavailable",
-                            style = TextStyle(
-                                color = Color.White.copy(alpha = 0.3f),
-                                fontSize = 13.sp,
-                                shadow = pickerShadow
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        if (choice.enabled) {
+                            PickerButton(text = "Run") { onPick(choice.id) }
+                        } else {
+                            BasicText(
+                                text = "Unavailable",
+                                style = TextStyle(
+                                    color = Color.White.copy(alpha = 0.3f),
+                                    fontSize = 13.sp,
+                                    shadow = pickerShadow
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }

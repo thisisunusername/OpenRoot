@@ -111,6 +111,13 @@ make -C native-pct payload      # writes build/pct/libpct-opace6.so
    tap it and allow the request in the Shizuku dialog.
 3. The app connects immediately. There is nothing to pair and no code to type.
 
+A granted server is not automatically a working one. OpenRoot runs a one-word `echo` through
+`Shizuku.newProcess` before trusting the link: a fork of the Shizuku server that reports the grant
+but cannot start a process (some third-party implementations do) is reported as **Shizuku cannot run
+commands**, and the app falls back to the ADB routes below instead of asking for a permission that
+is already there. That message means the server, not the permission, is the problem — restarting the
+Shizuku service is usually enough.
+
 ### With wireless debugging
 
 1. Enable **Wireless debugging** in Developer options on the device.
@@ -119,6 +126,29 @@ make -C native-pct payload      # writes build/pct/libpct-opace6.so
 3. Open **Pair device with pairing code** on the device, then enter the six digit code in the
    notification. Once it succeeds, the pairing button is hidden.
 4. From then on the app connects by itself.
+
+### With a plain `adb tcpip` port
+
+Some devices have no **Wireless debugging** entry at all: the setting was stripped by the OEM, or the
+release predates Android 11. Those devices often still run an `adbd` listening on TCP, started with
+`adb tcpip 5555` or by `service.adb.tcp.port`. OpenRoot connects to that daemon directly.
+
+1. Type the endpoint in the field under the primary button. `127.0.0.1:5555` targets the daemon on
+   this device; a bare port means the same host, and `adb://host:port` is accepted too.
+2. Tap **Connect**.
+
+That daemon never shows the *Allow USB debugging* prompt, so it refuses every key it was not told
+about before, and the allow-list lives in `/data/misc/adb/adb_keys`, which the shell user cannot
+write. The answer is to present a key that `adbd` already accepts:
+
+3. Tap **ADB key**, paste a PKCS#8 private key that already connected to this device — for example
+   `~/.android/adbkey` from a Termux install that ran `adb connect` here — and tap **Use this key**.
+   Only the `-----BEGIN PRIVATE KEY-----` block is needed; the trailing `user@host` line is not.
+4. Tap **Connect** again. The key is stored, so later launches reuse it and the field appears only
+   when the last connection attempt failed.
+
+The key is never logged and never leaves the app's private storage. The label above the button
+reads **Using an imported ADB key** once one is in place.
 
 ### Running an exploit
 

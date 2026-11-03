@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hexo141.liquidglass.R
+import com.hexo141.liquidglass.adb.AdbConnectionManager
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -164,8 +165,8 @@ fun AboutScreen(
             }
             Spacer(Modifier.height(10.dp))
             listOf(
-                "Wireless ADB pairing, no cable and no PC.",
-                "Or Shizuku: no pairing code at all, just grant access.",
+                "Shizuku first, then wireless debugging, then a plain adb tcpip port.",
+                "No cable, no PC: pair with a code, type an endpoint, or import a key adbd already trusts.",
                 "Runs a temporary root payload on supported kernels."
             ).forEach { line ->
                 BasicText(
@@ -179,6 +180,25 @@ fun AboutScreen(
                 )
                 Spacer(Modifier.height(6.dp))
             }
+
+            Spacer(Modifier.height(8.dp))
+            // Says which of the three routes is carrying the session, so a user reporting a
+            // problem does not have to guess. Deliberately not remembered: the transport changes
+            // after a reconnect or an import, and a cached value would keep showing the old one.
+            val transport = AdbConnectionManager.get(context).activeTransport()
+            BasicText(
+                text = when (transport) {
+                    AdbConnectionManager.Transport.SHIZUKU -> "Transport: Shizuku (shell)"
+                    AdbConnectionManager.Transport.ADB -> "Transport: ADB over TCP"
+                    AdbConnectionManager.Transport.NONE -> "Transport: not connected"
+                },
+                style = TextStyle(
+                    color = Color.White.copy(alpha = 0.62f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    shadow = aboutShadow
+                )
+            )
 
             Spacer(Modifier.height(6.dp))
             BasicText(

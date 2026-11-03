@@ -37,6 +37,16 @@ Shizuku is installed and authorised, OpenRoot never needs a pairing code at all.
   - **CVE-2025-21479** (`CP_SMMU_TABLE_UPDATE` check bypass in the Adreno A7xx firmware): the GPU
     page-table rewrite becomes a physical read/write primitive, `__do_sys_capset` is patched and the
     staged `bootstrap` is re-executed as uid 0.
+
+    The primitive depends on landing on a kernel physical address that is still mapped in the GPU's
+    page tables, so the payload walks a table of candidate addresses and restarts itself between
+    attempts. Restarting is the only way to drop the driver's per-process state, and the driver does
+    not return that memory while the process is alive — which is why the walk stops after
+    `MAX_ATTEMPTS` (8) candidates instead of exhausting the whole table. On a device where the
+    primitive never lands, exhausting the table used to cost over a gigabyte of RAM and push the
+    system into constant swapping. Override with `CHEESE_MAX_ATTEMPTS=<n>` when a device really needs
+    to search further; the payload is restarted, not re-run in place, so each attempt repeats its
+    full ~43 MB kernel read.
   - **CVE-2026-43284** (page cache write primitive): loads a small kernel module. It needs no
     per-device profile, only a kernel major/minor that matches one of the bundled module images,
     and it runs inside the app process because it uses the IPsec transform the app installs.

@@ -25,6 +25,19 @@ const uint64_t kFakeGpuAddr = 0x40403000;
 #define DEFAULT_KERNEL_SIZE_MB 43
 #endif
 
+/**
+ * How many candidate physical addresses [maybe_retry] may walk.
+ *
+ * Each attempt restarts this process to drop the GPU driver's per-process state, and the driver
+ * does not hand that memory back while the process is alive. Walking the whole [gPhyAddrs] table
+ * on a device where the primitive never lands therefore costs upwards of a gigabyte, which is
+ * enough to push the system into constant swapping. Override with `CHEESE_MAX_ATTEMPTS` when a
+ * device genuinely needs to search further.
+ */
+#ifndef MAX_ATTEMPTS
+#define MAX_ATTEMPTS 8
+#endif
+
 static int setup_pagetables(uint8_t *tt0, uint32_t pages, uint64_t tt0phys, uint64_t fake_gpuaddr, uint64_t target_pa);
 static void sync_cache_to_gpu(void* start, void* end);
 static void sync_cache_from_gpu(void* start, void* end);
@@ -1832,16 +1845,47 @@ static int resume_root_child(struct root_child_session* session) {
     return 0;
 }
 
+/**
+ * Hands the next candidate physical address to a fresh copy of this process.
+ *
+ * `execv` is the only way to drop the GPU driver's state between candidates: the driver keeps
+ * allocations keyed to the process, and a failed attempt leaks them even after every `malloc` in
+ * this file has been freed. Restarting resets that state, at the cost of leaving the earlier
+ * allocations in the driver's bookkeeping for as long as the process lives.
+ *
+ * That leak is why the retry count is bounded by [MAX_ATTEMPTS] rather than by the size of
+ * [gPhyAddrs]: on a device where the primitive never lands, walking the whole table cost more
+ * than a gigabyte of RAM, which pushed the system into constant swapping and made every other
+ * app crawl. A handful of candidates is enough to tell a wrong address from a broken setup.
+ */
 static void maybe_retry(char** argv) {
     char* attempt = getenv("CHEESE_ATTEMPT");
     int attempt_num = attempt? atoi(attempt): 0;
     int new_attempt = attempt_num + 1;
-    if (new_attempt < sizeof(gPhyAddrs) / sizeof(*gPhyAddrs)) {
-        char new_attempt_str[10];
-        snprintf(new_attempt_str, sizeof(new_attempt_str), "%d", new_attempt);
-        setenv("CHEESE_ATTEMPT", new_attempt_str, true);
-        execv("/proc/self/exe", argv);
+    int candidates = (int)(sizeof(gPhyAddrs) / sizeof(*gPhyAddrs));
+    int limit = MAX_ATTEMPTS;
+    char* override = getenv("CHEESE_MAX_ATTEMPTS");
+    if (override) {
+        int requested = atoi(override);
+        if (requested > 0) {
+            limit = requested;
+        }
     }
+    if (limit > candidates) {
+        limit = candidates;
+    }
+    if (new_attempt >= limit) {
+        fprintf(stderr,
+                "Giving up after %d candidate addresses out of %d; the GPU primitive did not "
+                "land and the remaining candidates would keep leaking driver memory.\n",
+                new_attempt, candidates);
+        return;
+    }
+    char new_attempt_str[10];
+    snprintf(new_attempt_str, sizeof(new_attempt_str), "%d", new_attempt);
+    setenv("CHEESE_ATTEMPT", new_attempt_str, true);
+    execv("/proc/self/exe", argv);
+    fprintf(stderr, "can't re-exec for attempt %d: %s\n", new_attempt, strerror(errno));
 }
 
 int main(int argc, char** argv) {

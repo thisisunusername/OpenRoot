@@ -79,4 +79,139 @@
     <string name="tab_log">Log</string>
     <string name="tab_about">About</string>
     <string name="tab_vivo">vivo</string>
+
+    <!-- ===== Language switch ===== -->
+    <string name="language_title">Language</string>
+    <string name="language_auto">Follow system</string>
+    <string name="language_english">English</string>
+    <string name="language_chinese">简体中文</string>
+    <string name="language_changed">Language changed</string>
+
+    <!-- ===== About screen ===== -->
+    <string name="about_title">About</string>
+    <string name="about_line_shizuku">Shizuku first, then wireless debugging, then a plain adb tcpip port.</string>
+    <string name="about_line_no_cable">No cable, no PC: pair with a code, type an endpoint, or import a key adbd already trusts.</string>
+    <string name="about_line_payload">Runs a temporary root payload on supported kernels.</string>
+    <string name="about_transport_shizuku">Transport: Shizuku (shell)</string>
+    <string name="about_transport_adb">Transport: ADB over TCP</string>
+    <string name="about_transport_none">Transport: not connected</string>
+    <string name="about_contributors">Contributors</string>
+    <string name="about_open_github">Open on GitHub</string>
+    <string name="about_disclaimer">Use it only on hardware you own.</string>
+    <string name="about_update">Download update</string>
+
+    <!-- ===== Pairing screen status ===== -->
+    <string name="status_connected">Connected</string>
+    <string name="status_shizuku_ready">Shizuku ready</string>
+    <string name="status_shizuku_permission_needed">Shizuku access needed</string>
+    <string name="status_shizuku_permission_denied">Shizuku access denied</string>
+    <string name="status_shizuku_cannot_run">Shizuku cannot run commands</string>
+    <string name="status_shizuku_not_running">Shizuku not running</string>
+    <string name="status_waiting_adbd">Waiting for adbd</string>
+    <string name="status_not_paired">Not paired</string>
+    <string name="pairing_exploit_running_open_log">Exploit running - open log</string>
+    <string name="pairing_open_exploit_log">Open exploit log</string>
+    <string name="pairing_manager_prefix">KernelSU manager: %1$s</string>
+    <string name="pairing_manager_not_found">KernelSU manager: not found</string>
+
+    <!-- ===== Device status card ===== -->
+    <string name="support_supported">Supported</string>
+    <string name="support_candidate">Untested</string>
+    <string name="support_unsupported">Unsupported</string>
+    <string name="support_not_connected">Not connected</string>
+    <string name="support_checking">Checking</string>
+    <string name="support_no_adbd">No adbd session yet</string>
+    <string name="support_reading_device">Reading device</string>
+    <string name="support_unknown_kernel">Unknown kernel</string>
+    <string name="support_engine_ready">Engine: %1$s</string>
+    <string name="support_payload_ready">Payload is ready</string>
+    <string name="support_engine_unverified">Engine: %1$s - not verified yet</string>
+    <string name="support_not_verified_yet">Not verified yet</string>
+    <string name="support_engine_failed">Engine: %1$s - last run did not root</string>
+    <string name="support_no_payload">No payload supports this kernel</string>
+    <string name="support_connect_to_check">Connect to check device support</string>
+    <string name="support_looking_for_engine">Looking for a matching engine</string>
+
+    <!-- ===== Device info card labels ===== -->
+    <string name="label_adb">ADB</string>
+    <string name="label_device">Device</string>
+    <string name="label_chip">Chip</string>
+    <string name="label_android">Android</string>
+    <string name="label_selinux">SELinux</string>
+    <string name="label_gpu">GPU</string>
+    <string name="label_kernel">Kernel</string>
+
+    <!-- ===== Engine picker ===== -->
+    <string name="engine_picker_title">Select vulnerability</string>
+    <string name="engine_picker_run">Run</string>
+    <string name="engine_picker_unavailable">Unavailable</string>
+    <string name="engine_picker_cancel">Cancel</string>
+    <string name="engine_connect_first">Connect to adb first</string>
+    <string name="engine_profile_ready">%1$s, profile ready</string>
+    <string name="engine_kernel_profile_for">Kernel profile for %1$s</string>
+    <string name="engine_no_profile_5_4">No 5.4 / 5.4-qgki profile for %1$s</string>
+    <string name="engine_payload_not_packaged">Payload not packaged for this ABI</string>
+    <string name="engine_no_profile_for">No profile for %1$s</string>
+    <string name="engine_race_detail">Race, up to 32 attempts, SELinux stays off, %1$s</string>
+    <string name="engine_gpu_not_supported">GPU not supported</string>
+    <string name="engine_selinux_off">SELinux stays off, %1$s</string>
+    <string name="engine_not_covered">Kernel not covered by the module images</string>
+    <string name="engine_built_for">Built for %1$s; this kernel is %2$s</string>
+    <string name="engine_shark_driver">Runs the shark driver, %1$s</string>
+    <string name="engine_joker_kernelsnitch">KernelSnitch, self-verifies with su -c id, %1$s</string>
+    <string name="engine_no_ported_build">No ported build for this device</string>
+    <string name="handoff_root_channel">root command channel</string>
+    <string name="handoff_starts">starts %1$s</string>
+
+    <!-- ===== Manager picker ===== -->
+    <string name="manager_title">KernelSU manager</string>
+    <string name="manager_nothing_detected">Nothing detected on this device.</string>
+    <string name="manager_detected">Detected: %1$s</string>
+    <string name="manager_package_label">Package name</string>
+    <string name="manager_package_hint">leave empty for automatic detection</string>
+    <string name="manager_ksud_label">ksud path</string>
+    <string name="manager_ksud_hint">/data/adb/ksu/bin/ksud</string>
+    <string name="manager_auto">Auto</string>
+    <string name="manager_save">Save</string>
+    <string name="manager_cancel">Cancel</string>
+
+    <!-- ===== Exploit log ===== -->
+    <string name="log_title">Exploit log</string>
+    <string name="log_running">Running</string>
+    <string name="log_run_as_root">Run a command as root</string>
+    <string name="log_run">Run</string>
+
+    <!-- ===== Consent screen ===== -->
+    <string name="consent_gpl_title">GNU GENERAL PUBLIC LICENSE, Version 3, 29 June 2007</string>
+    <string name="consent_disclaimer_title">TEMPORARY ROOT DISCLAIMER AND TERMS OF USE</string>
+    <string name="consent_license_hint">Bundled with this build. Read it in full.</string>
+    <string name="consent_accept_gpl">I have read and accept the GNU General Public License v3.0</string>
+    <string name="consent_accept_disclaimer">I have read and accept the temporary root disclaimer</string>
+    <string name="consent_back">Back</string>
+    <string name="consent_continue">Continue</string>
+    <string name="consent_accept_and_continue">Accept and continue</string>
+    <string name="consent_need_license_first">The licence has to be accepted before the next document.</string>
+    <string name="consent_stored_locally">Accepting is stored on this device only.</string>
+
+    <!-- ===== vivo / iQOO wired ===== -->
+    <string name="vivo_needs_android8">The USB host transport requires Android 8.0 or newer.</string>
+    <string name="vivo_stop">Stop</string>
+    <string name="vivo_start">Start</string>
+    <string name="vivo_title">vivo / iQOO</string>
+    <string name="vivo_card_target">Target</string>
+    <string name="vivo_reconnect">Reconnect</string>
+    <string name="vivo_connect">Connect</string>
+    <string name="vivo_model">Model</string>
+    <string name="vivo_system">System</string>
+    <string name="vivo_kernel">Kernel</string>
+    <string name="vivo_card_payload">Payload</string>
+    <string name="vivo_tag_match">match</string>
+    <string name="vivo_tag_mismatch">mismatch</string>
+    <string name="vivo_tag_local">local</string>
+    <string name="vivo_not_selected">Not selected</string>
+    <string name="vivo_bundled">Bundled</string>
+    <string name="vivo_local">Local</string>
+    <string name="vivo_kernel_unknown">kernel unknown</string>
+    <string name="vivo_select_payload">Select payload</string>
+    <string name="vivo_close">Close</string>
 </resources>

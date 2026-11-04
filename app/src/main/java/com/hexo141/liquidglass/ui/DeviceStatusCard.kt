@@ -29,6 +29,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.hexo141.liquidglass.R
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -70,24 +72,32 @@ fun DeviceStatusCard(
         SupportState.Checking -> Color(0xFF7DD3FC)
     }
     val title = when (state) {
-        SupportState.Supported -> "Supported"
-        SupportState.Candidate -> "Untested"
-        SupportState.Unsupported -> "Unsupported"
-        SupportState.NotConnected -> "Not connected"
-        SupportState.Checking -> "Checking"
+        SupportState.Supported -> stringResource(R.string.support_supported)
+        SupportState.Candidate -> stringResource(R.string.support_candidate)
+        SupportState.Unsupported -> stringResource(R.string.support_unsupported)
+        SupportState.NotConnected -> stringResource(R.string.support_not_connected)
+        SupportState.Checking -> stringResource(R.string.support_checking)
     }
     val subtitle = when (state) {
-        SupportState.NotConnected -> "No adbd session yet"
-        SupportState.Checking -> release.ifEmpty { "Reading device" }
-        else -> release.ifEmpty { "Unknown kernel" }
+        SupportState.NotConnected -> stringResource(R.string.support_no_adbd)
+        SupportState.Checking ->
+            release.ifEmpty { stringResource(R.string.support_reading_device) }
+        else -> release.ifEmpty { stringResource(R.string.support_unknown_kernel) }
     }
     val detail = when (state) {
-        SupportState.Supported -> engineLabel?.let { "Engine: $it" } ?: "Payload is ready"
-        SupportState.Candidate -> engineLabel?.let { "Engine: $it - not verified yet" } ?: "Not verified yet"
-        SupportState.Unsupported -> engineLabel?.let { "Engine: $it - last run did not root" }
-            ?: "No payload supports this kernel"
-        SupportState.NotConnected -> "Connect to check device support"
-        SupportState.Checking -> "Looking for a matching engine"
+        SupportState.Supported -> engineLabel?.let {
+            stringResource(R.string.support_engine_ready, it)
+        } ?: stringResource(R.string.support_payload_ready)
+        SupportState.Candidate -> engineLabel?.let {
+            stringResource(R.string.support_engine_unverified, it)
+        } ?: stringResource(R.string.support_not_verified_yet)
+        // "Last run did not root" is the honest answer for a payload that ran but produced no su:
+        // the engine exists, the run failed, and retrying is the only thing left to try.
+        SupportState.Unsupported -> engineLabel?.let {
+            stringResource(R.string.support_engine_failed, it)
+        } ?: stringResource(R.string.support_no_payload)
+        SupportState.NotConnected -> stringResource(R.string.support_connect_to_check)
+        SupportState.Checking -> stringResource(R.string.support_looking_for_engine)
     }
 
     Box(

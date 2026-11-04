@@ -35,6 +35,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.hexo141.liquidglass.R
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -92,7 +94,7 @@ fun ManagerPicker(
                 .clickable(enabled = false) {}
         ) {
             BasicText(
-                text = "KernelSU manager",
+                text = stringResource(R.string.manager_title),
                 style = TextStyle(
                     color = Color.White.copy(alpha = 0.95f),
                     fontSize = 19.sp,
@@ -103,9 +105,9 @@ fun ManagerPicker(
             Spacer(Modifier.height(6.dp))
             BasicText(
                 text = if (detected.isEmpty()) {
-                    "Nothing detected on this device."
+                    stringResource(R.string.manager_nothing_detected)
                 } else {
-                    "Detected: $detected"
+                    stringResource(R.string.manager_detected, detected)
                 },
                 style = TextStyle(
                     color = Color.White.copy(alpha = 0.55f),
@@ -117,8 +119,8 @@ fun ManagerPicker(
             Spacer(Modifier.height(14.dp))
 
             Field(
-                label = "Package name",
-                hint = "leave empty for automatic detection",
+                label = stringResource(R.string.manager_package_label),
+                hint = stringResource(R.string.manager_package_hint),
                 value = pkg,
                 onValueChange = { pkg = it },
                 keyboardType = KeyboardType.Ascii,
@@ -126,8 +128,8 @@ fun ManagerPicker(
             )
             Spacer(Modifier.height(12.dp))
             Field(
-                label = "ksud path",
-                hint = "/data/adb/ksu/bin/ksud",
+                label = stringResource(R.string.manager_ksud_label),
+                hint = stringResource(R.string.manager_ksud_hint),
                 value = ksud,
                 onValueChange = { ksud = it },
                 keyboardType = KeyboardType.Ascii,
@@ -141,16 +143,16 @@ fun ManagerPicker(
             ) {
                 // Clearing both fields is the way back to automatic detection, so it is a first-class
                 // action rather than something the user has to infer from empty inputs.
-                PickerButton(text = "Auto") { onSave("", "") }
+                PickerButton(text = stringResource(R.string.manager_auto)) { onSave("", "") }
                 Spacer(Modifier.width(10.dp))
-                PickerButton(text = "Save") { onSave(pkg.trim(), ksud.trim()) }
+                PickerButton(text = stringResource(R.string.manager_save)) { onSave(pkg.trim(), ksud.trim()) }
             }
             Spacer(Modifier.height(4.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
-                PickerButton(text = "Cancel", onClick = onDismiss)
+                PickerButton(text = stringResource(R.string.manager_cancel), onClick = onDismiss)
             }
         }
     }

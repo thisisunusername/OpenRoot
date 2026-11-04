@@ -133,15 +133,19 @@ fun PairingScreen(
         needsPairing) && !shizukuUsable
 
     val statusText = when {
-        connecting -> "Connecting…"
-        connected -> "Connected"
-        shizukuStatus == ShizukuShell.Status.READY -> "Shizuku ready"
-        shizukuStatus == ShizukuShell.Status.PERMISSION_REQUIRED -> "Shizuku access needed"
-        shizukuStatus == ShizukuShell.Status.PERMISSION_DENIED -> "Shizuku access denied"
-        shizukuStatus == ShizukuShell.Status.UNUSABLE -> "Shizuku cannot run commands"
-        shizukuStatus == ShizukuShell.Status.NOT_RUNNING -> "Shizuku not running"
-        paired -> "Waiting for adbd"
-        else -> "Not paired"
+        connecting -> stringResource(R.string.adb_connect_connecting)
+        connected -> stringResource(R.string.status_connected)
+        shizukuStatus == ShizukuShell.Status.READY -> stringResource(R.string.status_shizuku_ready)
+        shizukuStatus == ShizukuShell.Status.PERMISSION_REQUIRED ->
+            stringResource(R.string.status_shizuku_permission_needed)
+        shizukuStatus == ShizukuShell.Status.PERMISSION_DENIED ->
+            stringResource(R.string.status_shizuku_permission_denied)
+        shizukuStatus == ShizukuShell.Status.UNUSABLE ->
+            stringResource(R.string.status_shizuku_cannot_run)
+        shizukuStatus == ShizukuShell.Status.NOT_RUNNING ->
+            stringResource(R.string.status_shizuku_not_running)
+        paired -> stringResource(R.string.status_waiting_adbd)
+        else -> stringResource(R.string.status_not_paired)
     }
 
     Box(modifier.fillMaxSize()) {
@@ -160,7 +164,7 @@ fun PairingScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 BasicText(
-                    text = "OpenRoot",
+                    text = stringResource(R.string.app_name),
                     style = TextStyle(
                         color = Color.White,
                         fontSize = 30.sp,
@@ -239,8 +243,8 @@ fun PairingScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     BasicText(
-                        text = managerLabel?.let { "KernelSU manager: $it" }
-                            ?: "KernelSU manager: not found",
+                        text = managerLabel?.let { stringResource(R.string.pairing_manager_prefix, it) }
+                            ?: stringResource(R.string.pairing_manager_not_found),
                         style = buttonTextStyle()
                     )
                 }
@@ -257,7 +261,8 @@ fun PairingScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     BasicText(
-                        text = if (exploiting) "Exploit running - open log" else "Open exploit log",
+                        text = if (exploiting) stringResource(R.string.pairing_exploit_running_open_log)
+                            else stringResource(R.string.pairing_open_exploit_log),
                         style = buttonTextStyle()
                     )
                 }

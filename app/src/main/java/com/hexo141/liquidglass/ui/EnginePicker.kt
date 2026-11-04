@@ -33,6 +33,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.hexo141.liquidglass.R
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -111,7 +113,7 @@ fun EnginePicker(
                 .padding(vertical = 18.dp, horizontal = 18.dp)
         ) {
             BasicText(
-                text = "Select vulnerability",
+                text = stringResource(R.string.engine_picker_title),
                 style = TextStyle(
                     color = Color.White.copy(alpha = 0.95f),
                     fontSize = 19.sp,
@@ -161,10 +163,10 @@ fun EnginePicker(
                         }
                         Spacer(Modifier.width(12.dp))
                         if (choice.enabled) {
-                            PickerButton(text = "Run") { onPick(choice.id) }
+                            PickerButton(text = stringResource(R.string.engine_picker_run)) { onPick(choice.id) }
                         } else {
                             BasicText(
-                                text = "Unavailable",
+                                text = stringResource(R.string.engine_picker_unavailable),
                                 style = TextStyle(
                                     color = Color.White.copy(alpha = 0.3f),
                                     fontSize = 13.sp,
@@ -180,7 +182,7 @@ fun EnginePicker(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
             ) {
-                PickerButton(text = "Cancel", onClick = onDismiss)
+                PickerButton(text = stringResource(R.string.engine_picker_cancel), onClick = onDismiss)
             }
         }
     }

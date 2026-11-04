@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Languages this app ships translations for.
+
+  Android 13+ reads this through `android:localeConfig` and shows the same list in the system's
+  per-app language settings, so the in-app picker and Settings never disagree. `en` is the default
+  because it is the language every string in `values/` is written in.
+-->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="en" />
+    <locale android:name="zh-Hans" />
+</locale-config>

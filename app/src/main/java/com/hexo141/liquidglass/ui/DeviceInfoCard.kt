@@ -21,7 +21,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import com.hexo141.liquidglass.device.DeviceInfo
+import com.hexo141.liquidglass.R
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -56,7 +58,7 @@ fun DeviceInfoCards(
     ) {
         if (info == null) {
             InfoTile(
-                label = "ADB",
+                label = stringResource(R.string.label_adb),
                 value = statusText,
                 backdrop = backdrop,
                 surfaceColor = surfaceColor,
@@ -69,7 +71,7 @@ fun DeviceInfoCards(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             InfoTile(
-                label = "Device",
+                label = stringResource(R.string.label_device),
                 value = info.deviceName,
                 backdrop = backdrop,
                 surfaceColor = surfaceColor,
@@ -78,7 +80,7 @@ fun DeviceInfoCards(
                     .fillMaxHeight()
             )
             InfoTile(
-                label = "Chip",
+                label = stringResource(R.string.label_chip),
                 value = info.chipset,
                 backdrop = backdrop,
                 surfaceColor = surfaceColor,
@@ -92,7 +94,7 @@ fun DeviceInfoCards(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             InfoTile(
-                label = "Android",
+                label = stringResource(R.string.label_android),
                 value = info.androidVersion,
                 backdrop = backdrop,
                 surfaceColor = surfaceColor,
@@ -101,7 +103,7 @@ fun DeviceInfoCards(
                     .fillMaxHeight()
             )
             InfoTile(
-                label = "SELinux",
+                label = stringResource(R.string.label_selinux),
                 value = info.selinux,
                 backdrop = backdrop,
                 surfaceColor = surfaceColor,
@@ -111,14 +113,14 @@ fun DeviceInfoCards(
             )
         }
         InfoTile(
-            label = "GPU",
+            label = stringResource(R.string.label_gpu),
             value = info.gpu,
             backdrop = backdrop,
             surfaceColor = surfaceColor,
             modifier = Modifier.fillMaxWidth()
         )
         InfoTile(
-            label = "Kernel",
+            label = stringResource(R.string.label_kernel),
             value = info.kernel,
             backdrop = backdrop,
             surfaceColor = surfaceColor,

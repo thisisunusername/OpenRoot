@@ -160,12 +160,13 @@ object SharkRunner {
         onLine("$ cd $REMOTE_DIR && sh ${engine.script}")
         val output = StringBuilder()
         val exit = AdbShell.stream(
-            manager,
-            "cd $REMOTE_DIR && $env sh ${engine.script} 2>&1",
-        ) { line ->
-            output.append(line).append('\n')
-            onLine(line)
-        }
+            manager = manager,
+            command = "cd $REMOTE_DIR && $env sh ${engine.script} 2>&1",
+            onLine = { line ->
+                output.append(line).append('\n')
+                onLine(line)
+            },
+        )
         return Result(exitCode = exit, output = output.toString())
     }
 

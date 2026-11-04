@@ -34,10 +34,12 @@ import com.hexo141.liquidglass.root.ExploitMemory
 import com.hexo141.liquidglass.root.BinderBombRunner
 import com.hexo141.liquidglass.root.GhostLockRunner
 import com.hexo141.liquidglass.root.GpuRunner
+import com.hexo141.liquidglass.root.JokerRunner
 import com.hexo141.liquidglass.root.KsuManager
 import com.hexo141.liquidglass.root.PctRunner
 import com.hexo141.liquidglass.root.RootExploit
 import com.hexo141.liquidglass.root.RootHandoff
+import com.hexo141.liquidglass.root.SharkRunner
 import com.hexo141.liquidglass.root.RootShell
 import com.hexo141.liquidglass.ui.ConsentScreen
 import com.hexo141.liquidglass.ui.ConsentTransition
@@ -930,19 +932,17 @@ class MainActivity : AppCompatActivity() {
     ): ExploitChoice {
         val kernel = info?.kernel.orEmpty()
         val family = releasePrefixes.joinToString(" / ")
+        val packaged = SharkRunner.isPayloadPresent(this@MainActivity, this)
         return ExploitChoice(
-            id = id,
-            title = label,
+            id = this.id,
+            title = this.label,
             detail = when {
                 noConnection -> "Connect to adb first"
                 !matches(kernel) -> "Built for $family; this kernel is $kernel"
-                !SharkRunner.isPayloadPresent(this@MainActivity, this) ->
-                    "Payload not packaged for this ABI"
+                !packaged -> "Payload not packaged for this ABI"
                 else -> "Runs the shark driver, $handoff"
             },
-            enabled = info != null &&
-                matches(kernel) &&
-                SharkRunner.isPayloadPresent(this@MainActivity, this),
+            enabled = info != null && matches(kernel) && packaged,
         )
     }
 

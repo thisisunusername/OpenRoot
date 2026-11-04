@@ -75,6 +75,7 @@ import kotlin.math.absoluteValue
 @Composable
 fun AboutScreen(
     backdrop: Backdrop,
+    onOpenLicenses: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val surfaceColor =
@@ -246,6 +247,26 @@ fun AboutScreen(
             // read-once setting, and a whole tab for three buttons would be a worse trade than one
             // extra row here. `LocaleManager.apply` restarts the activity, so no state is hoisted.
             LocaleRow()
+            Spacer(Modifier.height(12.dp))
+            // Apache 2.0 and MPL 2.0 are not part of the first-start gate; both only require the
+            // notices to be reachable, so they are read-only pages opened from here.
+            LiquidGlassButton(
+                onClick = onOpenLicenses,
+                backdrop = backdrop,
+                surfaceColor = surfaceColor,
+                height = 46.dp,
+                horizontalPadding = 22.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                BasicText(
+                    text = stringResource(R.string.about_licenses),
+                    style = TextStyle(
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        shadow = aboutShadow
+                    )
+                )
+            }
         }
         Spacer(Modifier.height(12.dp))
         BasicText(

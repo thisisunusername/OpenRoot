@@ -17,7 +17,10 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.content.ContextCompat
 import com.hexo141.liquidglass.adb.AdbAuthenticationFailedException
@@ -28,6 +31,7 @@ import com.hexo141.liquidglass.adb.PairingState
 import com.hexo141.liquidglass.adb.ShizukuShell
 import rikka.shizuku.Shizuku
 import com.hexo141.liquidglass.consent.ConsentStore
+import com.hexo141.liquidglass.i18n.LocaleManager
 import com.hexo141.liquidglass.device.DeviceInfo
 import com.hexo141.liquidglass.root.DirtyFragRunner
 import com.hexo141.liquidglass.root.ExploitMemory
@@ -43,6 +47,8 @@ import com.hexo141.liquidglass.root.SharkRunner
 import com.hexo141.liquidglass.root.RootShell
 import com.hexo141.liquidglass.ui.ConsentScreen
 import com.hexo141.liquidglass.ui.ConsentTransition
+import com.hexo141.liquidglass.ui.LicensesScreen
+import com.hexo141.liquidglass.ui.WelcomeScreen
 import com.hexo141.liquidglass.ui.ExploitLogScreen
 import com.hexo141.liquidglass.ui.AboutScreen
 import com.hexo141.liquidglass.ui.AppScaffold
@@ -108,6 +114,15 @@ class MainActivity : AppCompatActivity() {
 
     /** First start: the GPL-3.0 text and the temporary-root disclaimer must both be accepted. */
     private val consentAccepted = mutableStateOf(false)
+
+    /**
+     * First start, before [consentAccepted]: a fresh install picks a language first, because asking
+     * someone to accept a legal document they cannot read is not consent.
+     */
+    private val languageChosen = mutableStateOf(true)
+
+    /** The About screen's licence viewer is open. */
+    private val licensesVisible = mutableStateOf(false)
 
     /** Whether the pairing service runs; Compose state so the button label follows it. */
     private val pairingRunning = mutableStateOf(false)
@@ -273,6 +288,8 @@ class MainActivity : AppCompatActivity() {
         // WindowInsets.safeDrawing, so nothing sits under the status or navigation bar.
 
         consentAccepted.value = ConsentStore.isAccepted(this)
+        // Started as `true` so the screen never flashes before the preference is read.
+        languageChosen.value = LocaleManager.hasChosen(this)
 
         // Shizuku listeners: the binder can arrive late (Shizuku started after this app) and the
         // user can grant access at any moment, so the connection state is re-evaluated on each event.
@@ -284,6 +301,7 @@ class MainActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
+                    licensesVisible.value -> licensesVisible.value = false
                     selectedTab.value != 0 -> selectedTab.value = 0
                     managerPickerVisible.value -> managerPickerVisible.value = false
                     pickerVisible.value -> pickerVisible.value = false
@@ -296,74 +314,92 @@ class MainActivity : AppCompatActivity() {
         })
 
         findViewById<ComposeView>(R.id.main).setContent {
+            if (!languageChosen.value) {
+                // Very first launch: pick a language before anything legal is shown. Applying the
+                // locale recreates this activity, after which hasChosen() is true.
+                WelcomeScreen(onDone = { languageChosen.value = true })
+                return@setContent
+            }
+
             // Fade into the main screen once both documents are accepted; before that it is not
             // composed at all and no ADB work happens.
             ConsentTransition(
                 accepted = consentAccepted.value,
                 consent = { ConsentScreen(onAccept = ::acceptConsent) },
                 main = {
-                    AppScaffold(
-                        selectedTab = selectedTab.value,
-                        onTabSelected = { selectedTab.value = it },
-                        home = { backdrop ->
-                            PairingScreen(
-                                running = pairingRunning.value,
-                                paired = paired.value,
-                                connecting = connecting.value,
-                                connected = connected.value,
-                                needsPairing = needsPairing.value,
-                                shizukuStatus = shizukuStatus.value,
-                                supportState = supportState.value,
-                                engineLabel = engineLabel.value,
-                                deviceInfo = deviceInfo.value,
-                                exploiting = exploiting.value,
-                                exploitLog = exploitLog.value,
-                                exploitStatus = exploitStatus.value,
-                                exploitChoices = exploitChoices.value,
-                                pickerVisible = pickerVisible.value,
-                                backdrop = backdrop,
-                                manualEndpoint = manualEndpoint.value,
-                                onManualConnect = ::connectManual,
-                                importedKey = importedKey.value,
-                                onImportKey = ::importKey,
-                                onToggle = ::onPrimaryAction,
-                                onExploit = ::openEnginePicker,
-                                onPickEngine = ::startExploit,
-                                onDismissPicker = { pickerVisible.value = false },
-                                onOpenLog = { selectedTab.value = 2 },
-                                managerLabel = ksudTarget.value?.let { target ->
-                                    target.packageName.ifEmpty { target.ksudPath }
-                                },
-                                managerPickerVisible = managerPickerVisible.value,
-                                managerPackage = managerOverride.value.packageName,
-                                managerKsud = managerOverride.value.ksudPath,
-                                onOpenManagerPicker = ::openManagerPicker,
-                                onSaveManager = ::saveManagerOverride,
-                                onDismissManagerPicker = { managerPickerVisible.value = false },
-                            )
-                        },
-                        log = { backdrop ->
-                            ExploitLogScreen(
-                                lines = exploitLog.value,
-                                status = exploitStatus.value,
-                                progress = exploitProgress.value,
-                                commandMode = commandMode.value,
-                                running = exploiting.value ||
-                                    (vivoController?.state?.running == true),
-                                onCommand = ::runRootCommand,
-                                backdrop = backdrop,
-                            )
-                        },
-                        about = { backdrop ->
-                            AboutScreen(backdrop = backdrop)
-                        },
-                        vivo = { backdrop ->
-                            VivoWiredScreen(
-                                backdrop = backdrop,
-                                controllerProvider = ::ensureVivoController,
-                            )
-                        },
-                    )
+                    Box(Modifier.fillMaxSize()) {
+                        AppScaffold(
+                            selectedTab = selectedTab.value,
+                            onTabSelected = { selectedTab.value = it },
+                            home = { backdrop ->
+                                PairingScreen(
+                                    running = pairingRunning.value,
+                                    paired = paired.value,
+                                    connecting = connecting.value,
+                                    connected = connected.value,
+                                    needsPairing = needsPairing.value,
+                                    shizukuStatus = shizukuStatus.value,
+                                    supportState = supportState.value,
+                                    engineLabel = engineLabel.value,
+                                    deviceInfo = deviceInfo.value,
+                                    exploiting = exploiting.value,
+                                    exploitLog = exploitLog.value,
+                                    exploitStatus = exploitStatus.value,
+                                    exploitChoices = exploitChoices.value,
+                                    pickerVisible = pickerVisible.value,
+                                    backdrop = backdrop,
+                                    manualEndpoint = manualEndpoint.value,
+                                    onManualConnect = ::connectManual,
+                                    importedKey = importedKey.value,
+                                    onImportKey = ::importKey,
+                                    onToggle = ::onPrimaryAction,
+                                    onExploit = ::openEnginePicker,
+                                    onPickEngine = ::startExploit,
+                                    onDismissPicker = { pickerVisible.value = false },
+                                    onOpenLog = { selectedTab.value = 2 },
+                                    managerLabel = ksudTarget.value?.let { target ->
+                                        target.packageName.ifEmpty { target.ksudPath }
+                                    },
+                                    managerPickerVisible = managerPickerVisible.value,
+                                    managerPackage = managerOverride.value.packageName,
+                                    managerKsud = managerOverride.value.ksudPath,
+                                    onOpenManagerPicker = ::openManagerPicker,
+                                    onSaveManager = ::saveManagerOverride,
+                                    onDismissManagerPicker = { managerPickerVisible.value = false },
+                                )
+                            },
+                            log = { backdrop ->
+                                ExploitLogScreen(
+                                    lines = exploitLog.value,
+                                    status = exploitStatus.value,
+                                    progress = exploitProgress.value,
+                                    commandMode = commandMode.value,
+                                    running = exploiting.value ||
+                                        (vivoController?.state?.running == true),
+                                    onCommand = ::runRootCommand,
+                                    backdrop = backdrop,
+                                )
+                            },
+                            about = { backdrop ->
+                                AboutScreen(
+                                    backdrop = backdrop,
+                                    onOpenLicenses = { licensesVisible.value = true },
+                                )
+                            },
+                            vivo = { backdrop ->
+                                VivoWiredScreen(
+                                    backdrop = backdrop,
+                                    controllerProvider = ::ensureVivoController,
+                                )
+                            },
+                        )
+
+                        // Read-only licence viewer, drawn over the scaffold so it behaves like a
+                        // page on top of About without adding a tab or a route.
+                        if (licensesVisible.value) {
+                            LicensesScreen(onBack = { licensesVisible.value = false })
+                        }
+                    }
                 },
             )
         }

@@ -44,9 +44,22 @@ enum class AppLanguage(val tag: String) {
  * composition time, so the screen has to be rebuilt for a new locale to take effect.
  */
 object LocaleManager {
-
     private const val STORE = "language"
     private const val KEY_LANGUAGE = "language"
+
+    /**
+     * Set once the first-start picker has been answered.
+     *
+     * It is a separate flag from [KEY_LANGUAGE] because "follow system" stores an empty tag: without
+     * this, a user who picked "follow system" would see the picker again on every cold start.
+     */
+    private const val KEY_CHOSEN = "chosen"
+
+    /** True once the language has been picked at least once, so the welcome screen can be skipped. */
+    fun hasChosen(context: Context): Boolean =
+        preferences(context).getBoolean(KEY_CHOSEN, false) ||
+            preferences(context).getString(KEY_LANGUAGE, "").orEmpty().isNotEmpty()
+
 
     /** The stored answer, or [AppLanguage.SYSTEM] when the user has never picked one. */
     fun current(context: Context): AppLanguage {
@@ -61,7 +74,10 @@ object LocaleManager {
 
     /** Applies [language] and rebuilds every open activity. */
     fun apply(context: Context, language: AppLanguage) {
-        preferences(context).edit().putString(KEY_LANGUAGE, language.tag).apply()
+        preferences(context).edit()
+            .putString(KEY_LANGUAGE, language.tag)
+            .putBoolean(KEY_CHOSEN, true)
+            .apply()
         val locales = if (language.tag.isEmpty()) {
             LocaleListCompat.getEmptyLocaleList()
         } else {

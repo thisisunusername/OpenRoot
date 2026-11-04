@@ -1,4 +1,7 @@
 # OpenRoot
+
+**English** | [简体中文](README.zh-CN.md)
+
 ![](https://i.imgs.ovh/2026/10/25/292fd26f3d676ca825fd439e2da0f1b5.png)
 OpenRoot is an Android app that reaches the device's own ADB daemon through **one of two
 transports**: wireless debugging pairing, or **Shizuku**. It connects, shows what the device

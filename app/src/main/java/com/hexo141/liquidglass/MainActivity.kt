@@ -84,6 +84,8 @@ class MainActivity : AppCompatActivity() {
          */
         const val ENGINE_JOKER_OGKI = "cve-2026-64560-joker-ogki"
 
+        /** Kernel family the JokerLock port was built against; shown when it does not match. */
+        const val JOKER_FAMILY = "6.6.118-android15-8 oplus GKI"
         /** How long to wait for `_adb-tls-connect._tcp` before giving up on a direct connect. */
         const val CONNECT_TIMEOUT_MS = 6_000L
 
@@ -888,9 +890,9 @@ class MainActivity : AppCompatActivity() {
         val manager = ksudTarget.value
         val noConnection = info == null
         val handoff = if (manager == null) {
-            "root command channel"
+            getString(R.string.handoff_root_channel)
         } else {
-            "starts ${manager.packageName}"
+            getString(R.string.handoff_starts, manager.packageName)
         }
 
         return listOf(
@@ -898,11 +900,14 @@ class MainActivity : AppCompatActivity() {
                 id = ENGINE_CVE_43499,
                 title = "CVE-2026-43499",
                 detail = when {
-                    noConnection -> "Connect to adb first"
-                    available.ghostLock != null -> "${available.ghostLock}, profile ready"
-                    available.profile -> "Kernel profile for $kernel"
-                    !RootExploit.isPayloadPresent(this) -> "Payload not packaged for this ABI"
-                    else -> "No profile for $kernel"
+                    noConnection -> getString(R.string.engine_connect_first)
+                    available.ghostLock != null ->
+                        getString(R.string.engine_profile_ready, available.ghostLock)
+                    available.profile ->
+                        getString(R.string.engine_kernel_profile_for, kernel)
+                    !RootExploit.isPayloadPresent(this) ->
+                        getString(R.string.engine_payload_not_packaged)
+                    else -> getString(R.string.engine_no_profile_for, kernel)
                 },
                 enabled = available.ghostLock != null || available.profile,
             ),
@@ -910,12 +915,13 @@ class MainActivity : AppCompatActivity() {
                 id = ENGINE_CVE_0041,
                 title = "CVE-2020-0041",
                 detail = when {
-                    noConnection -> "Connect to adb first"
+                    noConnection -> getString(R.string.engine_connect_first)
                     available.binderBomb != null ->
-                        "${available.binderBomb}, profile ready, $handoff"
+                        "${available.binderBomb}, " +
+                            getString(R.string.engine_profile_ready, handoff)
                     !BinderBombRunner.isPayloadPresent(this) ->
-                        "Payload not packaged for this ABI"
-                    else -> "No 5.4 / 5.4-qgki profile for $kernel"
+                        getString(R.string.engine_payload_not_packaged)
+                    else -> getString(R.string.engine_no_profile_5_4, kernel)
                 },
                 enabled = available.binderBomb != null,
             ),
@@ -923,10 +929,11 @@ class MainActivity : AppCompatActivity() {
                 id = ENGINE_CVE_64560,
                 title = "CVE-2026-64560",
                 detail = when {
-                    noConnection -> "Connect to adb first"
-                    !available.pctMatched -> "No ported build for this device"
-                    available.pctPayload == null -> "Payload not packaged for this ABI"
-                    else -> "Race, up to 32 attempts, SELinux stays off, $handoff"
+                    noConnection -> getString(R.string.engine_connect_first)
+                    !available.pctMatched -> getString(R.string.engine_no_ported_build)
+                    available.pctPayload == null ->
+                        getString(R.string.engine_payload_not_packaged)
+                    else -> getString(R.string.engine_race_detail, handoff)
                 },
                 enabled = available.pctPayload != null,
             ),
@@ -934,10 +941,11 @@ class MainActivity : AppCompatActivity() {
                 id = ENGINE_CVE_21479,
                 title = "CVE-2025-21479",
                 detail = when {
-                    noConnection -> "Connect to adb first"
-                    !available.gpuMatched -> "GPU not supported"
-                    available.gpuPayload == null -> "Payload not packaged for this ABI"
-                    else -> "SELinux stays off, $handoff"
+                    noConnection -> getString(R.string.engine_connect_first)
+                    !available.gpuMatched -> getString(R.string.engine_gpu_not_supported)
+                    available.gpuPayload == null ->
+                        getString(R.string.engine_payload_not_packaged)
+                    else -> getString(R.string.engine_selinux_off, handoff)
                 },
                 enabled = available.gpuPayload != null,
             ),
@@ -945,8 +953,9 @@ class MainActivity : AppCompatActivity() {
                 id = ENGINE_CVE_43284,
                 title = "CVE-2026-43284",
                 detail = when {
-                    noConnection -> "Connect to adb first"
-                    available.pageCache == null -> "Kernel not covered by the module images"
+                    noConnection -> getString(R.string.engine_connect_first)
+                    available.pageCache == null ->
+                        getString(R.string.engine_not_covered)
                     else -> "${available.pageCache}, $handoff"
                 },
                 enabled = available.pageCache != null,
@@ -958,11 +967,12 @@ class MainActivity : AppCompatActivity() {
                 id = ENGINE_JOKER_OGKI,
                 title = "CVE-2026-64560 (JokerLock, oplus GKI)",
                 detail = when {
-                    noConnection -> "Connect to adb first"
+                    noConnection -> getString(R.string.engine_connect_first)
                     !JokerRunner.isSupported(kernel) ->
-                        "Built for 6.6.118-android15-8 oplus GKI; this kernel is $kernel"
-                    !JokerRunner.isPayloadPresent(this) -> "Payload not packaged for this ABI"
-                    else -> "KernelSnitch, self-verifies with su -c id, $handoff"
+                        getString(R.string.engine_built_for, JOKER_FAMILY, kernel)
+                    !JokerRunner.isPayloadPresent(this) ->
+                        getString(R.string.engine_payload_not_packaged)
+                    else -> getString(R.string.engine_joker_kernelsnitch, handoff)
                 },
                 enabled = info != null &&
                     JokerRunner.isSupported(kernel) &&
@@ -990,10 +1000,10 @@ class MainActivity : AppCompatActivity() {
             id = this.id,
             title = this.label,
             detail = when {
-                noConnection -> "Connect to adb first"
-                !matches(kernel) -> "Built for $family; this kernel is $kernel"
-                !packaged -> "Payload not packaged for this ABI"
-                else -> "Runs the shark driver, $handoff"
+                noConnection -> getString(R.string.engine_connect_first)
+                !matches(kernel) -> getString(R.string.engine_built_for, family, kernel)
+                !packaged -> getString(R.string.engine_payload_not_packaged)
+                else -> getString(R.string.engine_shark_driver, handoff)
             },
             enabled = info != null && matches(kernel) && packaged,
         )

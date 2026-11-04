@@ -45,12 +45,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import com.hexo141.liquidglass.vivo.VivoPayload
 import com.hexo141.liquidglass.vivo.VivoStage
 import com.hexo141.liquidglass.vivo.VivoTarget
 import com.hexo141.liquidglass.vivo.VivoUiState
 import com.hexo141.liquidglass.vivo.VivoWiredController
 import com.hexo141.liquidglass.vivo.progressFraction
+import com.hexo141.liquidglass.R
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -80,7 +82,7 @@ fun VivoWiredScreen(
             VivoHeader()
             Spacer(Modifier.height(16.dp))
             BasicText(
-                text = "The USB host transport requires Android 8.0 or newer.",
+                text = stringResource(R.string.vivo_needs_android8),
                 style = TextStyle(
                     color = Color.White.copy(alpha = 0.75f),
                     fontSize = 12.sp,
@@ -148,7 +150,8 @@ fun VivoWiredScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 BasicText(
-                    text = if (state.running) "Stop" else "Start",
+                    text = if (state.running) stringResource(R.string.vivo_stop)
+                        else stringResource(R.string.vivo_start),
                     style = vivoButtonText,
                 )
             }
@@ -192,7 +195,7 @@ fun VivoWiredScreen(
 @Composable
 private fun VivoHeader() {
     BasicText(
-        text = "vivo / iQOO",
+        text = stringResource(R.string.vivo_title),
         style = TextStyle(
             color = Color.White,
             fontSize = 22.sp,
@@ -211,10 +214,11 @@ private fun TargetCard(
 ) {
     VivoGlassCard(backdrop, surfaceColor) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            CardTitle("Target")
+            CardTitle(stringResource(R.string.vivo_card_target))
             Spacer(Modifier.weight(1f))
             PillButton(
-                text = if (state.connected) "Reconnect" else "Connect",
+                text = if (state.connected) stringResource(R.string.vivo_reconnect)
+                    else stringResource(R.string.vivo_connect),
                 enabled = !state.connecting && !state.running,
                 onClick = onConnect,
             )
@@ -222,9 +226,9 @@ private fun TargetCard(
         Spacer(Modifier.height(8.dp))
         val target = state.target
         if (target != null) {
-            InfoLine("Model", target.identity)
-            InfoLine("System", target.system)
-            InfoLine("Kernel", target.kernel)
+            InfoLine(stringResource(R.string.vivo_model), target.identity)
+            InfoLine(stringResource(R.string.vivo_system), target.system)
+            InfoLine(stringResource(R.string.vivo_kernel), target.kernel)
         }
     }
 }
@@ -242,16 +246,16 @@ private fun PayloadCard(
     val target = state.target
     VivoGlassCard(backdrop, surfaceColor) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            CardTitle("Payload")
+            CardTitle(stringResource(R.string.vivo_card_payload))
             Spacer(Modifier.weight(1f))
             if (payload != null) {
                 when {
                     target == null -> Unit
-                    payload.matches(target) -> StatusTag("match", VivoGreen)
-                    else -> StatusTag("mismatch", VivoAmber)
+                    payload.matches(target) -> StatusTag(stringResource(R.string.vivo_tag_match), VivoGreen)
+                    else -> StatusTag(stringResource(R.string.vivo_tag_mismatch), VivoAmber)
                 }
             } else if (localName != null) {
-                StatusTag("local", VivoBlue)
+                StatusTag(stringResource(R.string.vivo_tag_local), VivoBlue)
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -270,7 +274,7 @@ private fun PayloadCard(
                 )
                 Spacer(Modifier.height(3.dp))
                 BasicText(
-                    text = buildPayloadDetail(payload),
+                    text = buildPayloadDetail(payload, stringResource(R.string.vivo_kernel_unknown)),
                     style = TextStyle(
                         color = Color.White.copy(alpha = 0.58f),
                         fontSize = 10.sp,
@@ -296,7 +300,7 @@ private fun PayloadCard(
             }
             else -> {
                 BasicText(
-                    text = "Not selected",
+                    text = stringResource(R.string.vivo_not_selected),
                     style = TextStyle(
                         color = Color.White.copy(alpha = 0.55f),
                         fontSize = 11.5.sp,
@@ -308,13 +312,13 @@ private fun PayloadCard(
         Spacer(Modifier.height(10.dp))
         Row {
             PillButton(
-                text = "Bundled",
+                text = stringResource(R.string.vivo_bundled),
                 enabled = !state.running,
                 onClick = onPickBundled,
             )
             Spacer(Modifier.width(10.dp))
             PillButton(
-                text = "Local",
+                text = stringResource(R.string.vivo_local),
                 enabled = !state.running,
                 onClick = onPickLocal,
             )
@@ -322,11 +326,18 @@ private fun PayloadCard(
     }
 }
 
-private fun buildPayloadDetail(payload: VivoPayload): String = buildString {
+/**
+ * One-line summary of a payload: kernel, build id and library.
+ *
+ * Plain function, not a composable, so the translated "kernel unknown" is passed in by the caller
+ * instead of being resolved here - `stringResource` is a @Composable call and cannot run outside a
+ * composition.
+ */
+private fun buildPayloadDetail(payload: VivoPayload, kernelUnknown: String): String = buildString {
     payload.kernelVersion?.let { append("kernel ").append(it) }
     if (payload.kernelUnknown) {
         if (isNotEmpty()) append(" · ")
-        append("kernel unknown")
+        append(kernelUnknown)
     }
     if (payload.buildId.isNotBlank()) {
         if (isNotEmpty()) append(" · ")
@@ -406,7 +417,7 @@ private fun PayloadPicker(
                     .padding(horizontal = 18.dp, vertical = 16.dp)
             ) {
                 BasicText(
-                    text = "Select payload",
+                    text = stringResource(R.string.vivo_select_payload),
                     style = TextStyle(
                         color = Color.White.copy(alpha = 0.95f),
                         fontSize = 19.sp,
@@ -461,7 +472,7 @@ private fun PayloadPicker(
                                 )
                                 Spacer(Modifier.height(2.dp))
                                 BasicText(
-                                    text = buildPayloadDetail(payload),
+                                    text = buildPayloadDetail(payload, stringResource(R.string.vivo_kernel_unknown)),
                                     style = TextStyle(
                                         color = Color.White.copy(alpha = 0.55f),
                                         fontSize = 9.5.sp,
@@ -474,7 +485,7 @@ private fun PayloadPicker(
                                 if (matches) {
                                     Spacer(Modifier.height(2.dp))
                                     BasicText(
-                                        text = "match",
+                                        text = stringResource(R.string.vivo_tag_match),
                                         style = TextStyle(
                                             color = VivoGreen,
                                             fontSize = 9.5.sp,
@@ -491,7 +502,7 @@ private fun PayloadPicker(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                 ) {
-                    PillButton(text = "Close", enabled = true, onClick = onDismiss)
+                    PillButton(text = stringResource(R.string.vivo_close), enabled = true, onClick = onDismiss)
                 }
             }
         }

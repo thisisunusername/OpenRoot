@@ -76,6 +76,11 @@ class MainActivity : AppCompatActivity() {
         const val ENGINE_SHARK_64560 = "cve-2026-64560-shark"
         const val ENGINE_SHARK_98260 = "cve-2026-98260-shark"
         const val ENGINE_SHARK_61269 = "cve-2026-61269-shark"
+        /**
+         * The same CVE as [ENGINE_CVE_64560], but JokerLock's own build: Oppo/Realme/OnePlus GKI on
+         * 6.6.118-android15-8, where the shipped PctRunner payload has no port.
+         */
+        const val ENGINE_JOKER_OGKI = "cve-2026-64560-joker-ogki"
 
         /** How long to wait for `_adb-tls-connect._tcp` before giving up on a direct connect. */
         const val CONNECT_TIMEOUT_MS = 6_000L
@@ -894,6 +899,20 @@ class MainActivity : AppCompatActivity() {
             SharkRunner.Engine.CVE_64560.toChoice(info, noConnection, handoff),
             SharkRunner.Engine.CVE_98260.toChoice(info, noConnection, handoff),
             SharkRunner.Engine.CVE_61269.toChoice(info, noConnection, handoff),
+            ExploitChoice(
+                id = ENGINE_JOKER_OGKI,
+                title = "CVE-2026-64560 (JokerLock, oplus GKI)",
+                detail = when {
+                    noConnection -> "Connect to adb first"
+                    !JokerRunner.isSupported(kernel) ->
+                        "Built for 6.6.118-android15-8 oplus GKI; this kernel is $kernel"
+                    !JokerRunner.isPayloadPresent(this) -> "Payload not packaged for this ABI"
+                    else -> "KernelSnitch, self-verifies with su -c id, $handoff"
+                },
+                enabled = info != null &&
+                    JokerRunner.isSupported(kernel) &&
+                    JokerRunner.isPayloadPresent(this),
+            ),
         )
     }
 
@@ -956,6 +975,10 @@ class MainActivity : AppCompatActivity() {
                 if (!BinderBombRunner.isSupported(this, info.kernel)) return
             ENGINE_CVE_64560 -> if (pctPayload == null) return
             ENGINE_CVE_21479 -> if (gpuPayload == null) return
+            ENGINE_JOKER_OGKI ->
+                if (!JokerRunner.isSupported(info.kernel) || !JokerRunner.isPayloadPresent(this)) {
+                    return
+                }
             else -> {
                 // The three Shark ports share nothing but the driver shape: each one names its own
                 // kernel family, and the runner refuses a mismatch before anything is pushed.
@@ -987,6 +1010,7 @@ class MainActivity : AppCompatActivity() {
                 when {
                     engineId == ENGINE_CVE_43499 -> runProfileEngine(info, ksud)
                     engineId == ENGINE_CVE_0041 -> runBinderEngine(info, ksud)
+                    engineId == ENGINE_JOKER_OGKI -> runJokerEngine(info, ksud)
                     pctPayload != null -> runPctEngine(info, pctPayload, ksud)
                     gpuPayload != null -> runGpuEngine(info, gpuPayload, ksud)
                     shark != null -> runSharkEngine(info, shark, ksud)
@@ -1116,6 +1140,40 @@ class MainActivity : AppCompatActivity() {
         }
         ExploitMemory.record(this, info.kernel, result.handoff.rooted, ExploitMemory.ENGINE_PCT)
         return reportHandoff(ksud, result.handoff, result.exitCode)
+    }
+
+    /**
+     * CVE-2026-64560 through JokerLock's Okgi build.
+     *
+     * The payload recovers everything it needs at run time and reports through its own STAGE log, so
+     * the only interpretation left is the `su -c id` check the runner already performed. A refusal
+     * before the race says nothing about the vulnerability, so it is not remembered.
+     */
+    private fun runJokerEngine(info: DeviceInfo, ksud: KsuManager.Target?): String {
+        val result = JokerRunner.run(
+            context = this,
+            manager = AdbConnectionManager.get(this),
+            info = info,
+            onLine = ::logLine,
+        )
+        if (result.refused) {
+            return getString(R.string.exploit_exit_code, result.exitCode)
+        }
+        ExploitMemory.record(this, info.kernel, result.rooted, ExploitMemory.ENGINE_PCT)
+        if (!result.rooted) {
+            return getString(R.string.exploit_exit_code, result.exitCode)
+        }
+        if (ksud == null) {
+            runOnUiThread { commandMode.value = true }
+            return getString(R.string.exploit_root_ready)
+        }
+        val opened = KsuManager.launchWithRetry(
+            context = this,
+            manager = AdbConnectionManager.get(this),
+            packageName = ksud.packageName,
+            log = ::logLine,
+        )
+        return getString(if (opened) R.string.exploit_ksu_opened else R.string.exploit_ksu_manual)
     }
 
     /**

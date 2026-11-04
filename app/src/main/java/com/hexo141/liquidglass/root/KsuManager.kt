@@ -194,4 +194,159 @@ object KsuManager {
         val count = output.trim().toIntOrNull() ?: return true
         return count > 0
     }
+
+    /** Preference store for the manager choice and the `ksud` override. */
+    private const val PREF_NAME = "ksu_manager"
+    private const val KEY_PACKAGE = "package"
+    private const val KEY_KSUD = "ksud"
+
+    /**
+     * A manager the user picked by hand, which always wins over automatic resolution.
+     *
+     * Both halves are optional. A package name alone is enough when the manager is installed; the
+     * `ksud` path is what makes a fork the resolver would never recognise usable, and it is also the
+     * only way to point the payload at a copy that lives outside `/data/app`.
+     */
+    data class Override(val packageName: String, val ksudPath: String) {
+        val isEmpty: Boolean get() = packageName.isEmpty() && ksudPath.isEmpty()
+    }
+
+    fun override(context: Context): Override {
+        val prefs = context.applicationContext
+            .getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        return Override(
+            packageName = prefs.getString(KEY_PACKAGE, "").orEmpty(),
+            ksudPath = prefs.getString(KEY_KSUD, "").orEmpty(),
+        )
+    }
+
+    fun setOverride(context: Context, override: Override) {
+        context.applicationContext
+            .getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PACKAGE, override.packageName)
+            .putString(KEY_KSUD, override.ksudPath)
+            .apply()
+    }
+
+    /**
+     * The manager to use, honouring [override] first.
+     *
+     * A hand-picked `ksud` is trusted as given: the caller only has to be able to read it, and the
+     * payload only has to be able to execute it, so a path the resolver would never derive is
+     * accepted on purpose.
+     */
+    fun resolveWithOverride(
+        context: Context,
+        manager: AbsAdbConnectionManager?,
+        log: (String) -> Unit,
+    ): Target? {
+        val picked = override(context)
+        if (!picked.isEmpty) {
+            log("<i> using the manager chosen in Settings: ${picked.packageName.ifEmpty { "(no package)" }}")
+            val ksud = picked.ksudPath.ifEmpty {
+                // Package given but no path: ask the resolver for that package's library.
+                manager?.let { ksudPathOf(it, picked.packageName, log) }.orEmpty()
+            }
+            if (ksud.isNotEmpty()) return Target(picked.packageName, ksud)
+            log("<e> the chosen manager has no readable libksud.so; falling back to detection")
+        }
+        return resolve(context, manager, log)
+    }
+
+    /** `ls` the manager's own library directory, so a package name is enough to find `ksud`. */
+    private fun ksudPathOf(
+        manager: AbsAdbConnectionManager,
+        packageName: String,
+        log: (String) -> Unit,
+    ): String? {
+        if (packageName.isEmpty()) return null
+        val command = "find /data/app -path \"*/$packageName-*/lib/*/libksud.so\" 2>/dev/null | head -n 1"
+        log("$ $command")
+        val found = runCatching { AdbShell.exec(manager, command) }.getOrDefault("").trim()
+        if (found.isEmpty()) return null
+        log(found)
+        return found.lineSequence().firstOrNull { it.endsWith("/libksud.so") }
+    }
+
+    /** Official KernelSU release, fetched through the same proxy the app already uses. */
+    const val MANAGER_REPO = "tiann/KernelSU"
+
+    /**
+     * Downloads the official manager APK and installs it as the shell user.
+     *
+     * The shell user holds `INSTALL_PACKAGES` only on a debuggable or userdebug build, so this is
+     * attempted rather than promised: the result says exactly which step failed and the UI can fall
+     * back to "install it yourself". Downloads go through a mirror because `github.com` is not
+     * always reachable, and the release URL is resolved through the API first so a renamed asset
+     * still works.
+     */
+    data class InstallResult(val ok: Boolean, val message: String)
+
+    fun downloadAndInstallManager(
+        manager: AbsAdbConnectionManager,
+        onLine: (String) -> Unit,
+    ): InstallResult {
+        val remote = "/data/local/tmp/openroot/kernelsu-manager.apk"
+        onLine("<i> looking up the latest KernelSU release")
+        val tag = latestManagerTag() ?: return InstallResult(false, "cannot read the release list")
+        onLine("<i> latest release: $tag")
+        val urls = MANAGER_URLS.map { it.replace("\$TAG", tag) }
+        var downloaded = false
+        for (url in urls) {
+            onLine("$ curl -L -o $remote '$url'")
+            val fetch = runCatching {
+                AdbShell.exec(
+                    manager,
+                    "mkdir -p /data/local/tmp/openroot && " +
+                        "curl -sSL --max-time 180 -o $remote '$url' && ls -l $remote",
+                    240_000L,
+                )
+            }.getOrDefault("")
+            onLine(fetch.trimEnd())
+            // A mirror that answers 404 writes an HTML page, so check the magic rather than the size.
+            val magic = runCatching {
+                AdbShell.exec(manager, "head -c 2 $remote 2>/dev/null")
+            }.getOrDefault("")
+            if (!magic.startsWith("PK")) {
+                onLine("<e> $url did not return an APK; trying the next mirror")
+                continue
+            }
+            downloaded = true
+            break
+        }
+        if (!downloaded) return InstallResult(false, "every mirror failed")
+
+        onLine("$ pm install -r $remote")
+        val pm = runCatching {
+            AdbShell.exec(manager, "pm install -r $remote 2>&1", 180_000L)
+        }.getOrDefault("")
+        onLine(pm.trimEnd())
+        return when {
+            pm.contains("Success") -> InstallResult(true, "installed")
+            pm.contains("INSTALL_FAILED") ->
+                InstallResult(false, pm.lineSequence().firstOrNull { it.contains("INSTALL_FAILED") }.orEmpty())
+            pm.contains("Permission denied", ignoreCase = true) ->
+                InstallResult(false, "the shell user cannot install packages on this build")
+            else -> InstallResult(false, pm.trim().ifEmpty { "pm install said nothing" })
+        }
+    }
+
+    /** Tags the app tries, in order: raw GitHub first, then the mirror used for everything else. */
+    private val MANAGER_URLS = listOf(
+        "https://v6.gh-proxy.org/https://github.com/$MANAGER_REPO/releases/download/\$TAG/KernelSU_\$TAG.apk",
+        "https://v6.gh-proxy.org/https://github.com/$MANAGER_REPO/releases/latest/download/KernelSU.apk",
+        "https://github.com/$MANAGER_REPO/releases/download/\$TAG/KernelSU_\$TAG.apk",
+    )
+
+    /** Newest release tag from the GitHub API, or null when the list cannot be read. */
+    private fun latestManagerTag(): String? = runCatching {
+        val endpoint = "https://api.github.com/repos/$MANAGER_REPO/releases/latest"
+        val connection = java.net.URL(endpoint).openConnection() as java.net.HttpURLConnection
+        connection.connectTimeout = 15_000
+        connection.readTimeout = 15_000
+        connection.setRequestProperty("Accept", "application/vnd.github+json")
+        val body = connection.inputStream.bufferedReader().use { it.readText() }
+        Regex("\"tag_name\"\\s*:\\s*\"([^\"]+)\"").find(body)?.groupValues?.get(1)
+    }.getOrNull()
 }

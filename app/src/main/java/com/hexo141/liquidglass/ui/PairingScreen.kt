@@ -94,6 +94,23 @@ fun PairingScreen(
     onPickEngine: (String) -> Unit,
     onDismissPicker: () -> Unit,
     onOpenLog: () -> Unit,
+    /**
+     * Manager the payload hands off to, as reported by the resolver: either the package in the
+     * override, the one detection found, or `null` when there is none. A bare path means the user
+     * pointed at a `ksud` whose package the resolver cannot derive.
+     */
+    managerLabel: String?,
+    /** Whether the manager picker is shown. */
+    managerPickerVisible: Boolean,
+    /** Package currently in the override, or the empty string for automatic detection. */
+    managerPackage: String,
+    /** `ksud` path currently in the override, or the empty string to derive it. */
+    managerKsud: String,
+    /** Open the manager picker. */
+    onOpenManagerPicker: () -> Unit,
+    /** Save the two override fields; both empty means "back to automatic detection". */
+    onSaveManager: (packageName: String, ksudPath: String) -> Unit,
+    onDismissManagerPicker: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // API < 31 has no RenderEffect, so refraction does nothing; a translucent surface keeps the
@@ -205,6 +222,25 @@ fun PairingScreen(
                         text = stringResource(
                             if (exploiting) R.string.exploit_running else R.string.exploit_button
                         ),
+                        style = buttonTextStyle()
+                    )
+                }
+                // Which manager the payload will start is a decision the resolver makes on its own;
+                // a fork outside the built-in list, or a ksud that is not a manager's own library,
+                // can only be named by hand. The button states the current answer so the row is not
+                // mistaken for a second Exploit action.
+                Spacer(Modifier.height(10.dp))
+                LiquidGlassButton(
+                    onClick = onOpenManagerPicker,
+                    backdrop = backdrop,
+                    surfaceColor = glassSurfaceColor,
+                    height = 40.dp,
+                    horizontalPadding = 18.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    BasicText(
+                        text = managerLabel?.let { "KernelSU manager: $it" }
+                            ?: "KernelSU manager: not found",
                         style = buttonTextStyle()
                     )
                 }
@@ -325,6 +361,19 @@ fun PairingScreen(
             surfaceColor = glassSurfaceColor
         )
 
+        // Only one overlay at a time: both are modal and share the backdrop, so stacking them would
+        // put the second dialog's scrim over the first.
+        if (managerPickerVisible) {
+            ManagerPicker(
+                backdrop = backdrop,
+                surfaceColor = glassSurfaceColor,
+                packageName = managerPackage,
+                ksudPath = managerKsud,
+                detected = managerLabel.orEmpty(),
+                onSave = onSaveManager,
+                onDismiss = onDismissManagerPicker,
+            )
+        }
     }
 }
 

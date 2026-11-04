@@ -154,6 +154,10 @@ class MainActivity : AppCompatActivity() {
 
     /** Whether the vulnerability picker is shown. */
     private val pickerVisible = mutableStateOf(false)
+    /** Whether the KernelSU manager picker is shown. */
+    private val managerPickerVisible = mutableStateOf(false)
+    /** Hand-picked manager from [managerPickerVisible]; empty fields mean automatic detection. */
+    private val managerOverride = mutableStateOf(KsuManager.Override("", ""))
 
     /** Active bottom-bar tab: 0 home, 1 vivo/iQOO OTG, 2 exploit log, 3 about. */
     private val selectedTab = mutableStateOf(0)
@@ -279,6 +283,7 @@ class MainActivity : AppCompatActivity() {
             override fun handleOnBackPressed() {
                 when {
                     selectedTab.value != 0 -> selectedTab.value = 0
+                    managerPickerVisible.value -> managerPickerVisible.value = false
                     pickerVisible.value -> pickerVisible.value = false
                     else -> {
                         isEnabled = false
@@ -324,6 +329,15 @@ class MainActivity : AppCompatActivity() {
                                 onPickEngine = ::startExploit,
                                 onDismissPicker = { pickerVisible.value = false },
                                 onOpenLog = { selectedTab.value = 2 },
+                                managerLabel = ksudTarget.value?.let { target ->
+                                    target.packageName.ifEmpty { target.ksudPath }
+                                },
+                                managerPickerVisible = managerPickerVisible.value,
+                                managerPackage = managerOverride.value.packageName,
+                                managerKsud = managerOverride.value.ksudPath,
+                                onOpenManagerPicker = ::openManagerPicker,
+                                onSaveManager = ::saveManagerOverride,
+                                onDismissManagerPicker = { managerPickerVisible.value = false },
                             )
                         },
                         log = { backdrop ->
@@ -792,7 +806,7 @@ class MainActivity : AppCompatActivity() {
                     engineLabel.value = engine
                     supportState.value = state
                 }
-                val ksud = KsuManager.resolve(this, AdbConnectionManager.get(this)) { line ->
+                val ksud = KsuManager.resolveWithOverride(this, AdbConnectionManager.get(this)) { line ->
                     Log.i(TAG, line)
                 }
                 runOnUiThread { ksudTarget.value = ksud }
@@ -827,6 +841,45 @@ class MainActivity : AppCompatActivity() {
         // All four CVEs are always listed; each row explains whether it can run.
         exploitChoices.value = buildChoices(deviceInfo.value)
         pickerVisible.value = true
+    }
+    /**
+     * Manager row tapped: seed the dialog from what is stored, then resolve in the background so the
+     * "Detected:" line shows the live answer rather than a stale one.
+     */
+    private fun openManagerPicker() {
+        managerOverride.value = KsuManager.override(this)
+        managerPickerVisible.value = true
+        if (!connected.value) return
+        Thread({
+            val resolved = KsuManager.resolve(this, AdbConnectionManager.get(this)) { line ->
+                Log.i(TAG, line)
+            }
+            runOnUiThread { ksudTarget.value = resolved }
+        }, "ksu-manager-refresh").start()
+    }
+    /**
+     * Saves the two fields and re-resolves.
+     *
+     * Both functions only touch state: the override lives in the app's own preferences, so there is
+     * nothing to push before the next payload run, and re-resolving here is what makes the button
+     * label follow the choice immediately.
+     */
+    private fun saveManagerOverride(packageName: String, ksudPath: String) {
+        val picked = KsuManager.Override(packageName = packageName, ksudPath = ksudPath)
+        KsuManager.setOverride(this, picked)
+        managerOverride.value = picked
+        managerPickerVisible.value = false
+        if (!connected.value) {
+            ksudTarget.value = null
+            return
+        }
+        Thread({
+            val resolved = KsuManager.resolveWithOverride(
+                this,
+                AdbConnectionManager.get(this),
+            ) { line -> Log.i(TAG, line) }
+            runOnUiThread { ksudTarget.value = resolved }
+        }, "ksu-manager-save").start()
     }
 
     private fun buildChoices(info: DeviceInfo?): List<ExploitChoice> {
@@ -1004,8 +1057,26 @@ class MainActivity : AppCompatActivity() {
             // Resolving ksud scans /data/app over ADB: done once on this worker and shared by all
             // four engines, which also puts the scan itself in the log.
             val outcome = runCatching {
-                val ksud = KsuManager.resolve(this, AdbConnectionManager.get(this), ::logLine)
-                    ?.takeIf { it.packageName.isNotEmpty() }
+                val ksudRaw = KsuManager.resolveWithOverride(this, AdbConnectionManager.get(this), ::logLine)
+                // No manager means no late-load, and most payloads then stop at their own gate.
+                // Offer the official one instead of failing: installing it needs only the shell
+                // user we already have, and a build that refuses `pm install` says so in the log.
+                val ksud = if (ksudRaw == null) {
+                    logLine("<i> no KernelSU manager found; fetching the official one")
+                    val installed = KsuManager.downloadAndInstallManager(
+                        manager = AdbConnectionManager.get(this),
+                        onLine = ::logLine,
+                    )
+                    if (installed.ok) {
+                        logLine("<i> ${installed.message}; resolving again")
+                        KsuManager.resolveWithOverride(this, AdbConnectionManager.get(this), ::logLine)
+                    } else {
+                        logLine("<e> could not install a manager: ${installed.message}")
+                        null
+                    }
+                } else {
+                    ksudRaw
+                }?.takeIf { it.packageName.isNotEmpty() }
                 val shark = SharkRunner.Engine.ofId(engineId)
                 when {
                     engineId == ENGINE_CVE_43499 -> runProfileEngine(info, ksud)

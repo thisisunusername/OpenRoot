@@ -26,14 +26,21 @@ Shizuku is installed and authorised, OpenRoot never needs a pairing code at all.
   build props.
 - **Kernel support status.** The main screen reports whether the connected kernel has a bundled
   profile.
-- **Temporary root, four vulnerabilities.** The picker lists CVE ids, one row per bug; the build
-  that fits the connected device is selected after the row is chosen, so no row is tied to a single
-  device. On an arm64 device the app picks whichever engine can run:
+- **Temporary root, nine engines across seven CVE ids.** The picker lists one row per engine; the
+  build that fits the connected device is selected after the row is chosen, so no row is tied to a
+  single device. On an arm64 device the app picks whichever engine can run:
   - **CVE-2026-43499** (futex PI UAF): the payload and a profile matching the exact `uname -r` are
     pushed to `/data/local/tmp/openroot` and executed as the `shell` user.
   - **CVE-2026-64560** (posix-cpu-timers UAF on non-leader `exec()`): the freed `k_itimer` is turned
     into a physical read/write primitive, `init_cred` is staged on a child, and that child is handed
-    to the same `bootstrap` as the other engines. See `docs/CVE-2026-64560.md`.
+    to the same `bootstrap` as the other engines. See `docs/CVE-2026-64560.md`. Three builds of this
+    bug ship, each its own row because each was ported to a different kernel family:
+    - the bundled `PctRunner` build for the OnePlus Ace 6 (6.6.118 GKI),
+    - **CVE-2026-64560 (Shark)** for the 6.18 family,
+    - **CVE-2026-64560 (JokerLock)** for `6.6.118-android15-8` on the Oppo/Realme/OnePlus GKI,
+      firmware `gc4127a25dcf3` / `g9bc34d5b0c79`. That build resolves addresses at run time through
+      KernelSnitch instead of reading a profile, and keeps the kernel state it touches reversible so
+      a failed attempt still boots.
   - **CVE-2025-21479** (`CP_SMMU_TABLE_UPDATE` check bypass in the Adreno A7xx firmware): the GPU
     page-table rewrite becomes a physical read/write primitive, `__do_sys_capset` is patched and the
     staged `bootstrap` is re-executed as uid 0.
@@ -50,6 +57,16 @@ Shizuku is installed and authorised, OpenRoot never needs a pairing code at all.
   - **CVE-2026-43284** (page cache write primitive): loads a small kernel module. It needs no
     per-device profile, only a kernel major/minor that matches one of the bundled module images,
     and it runs inside the app process because it uses the IPsec transform the app installs.
+  - **CVE-2026-98260 (Shark)** and **CVE-2026-61269 (Shark)**: the other two ports that came over
+    with the same bundle. `98260` covers the 6.18 family and `61269` the 6.12 family. Both are
+    driven by the shell script that ships with them, which stages `syms.txt`, derives the KASLR
+    slide, runs the attack binary and late-loads `ksud`; the app only copies the files across and
+    forwards the log.
+
+  The Shark and JokerLock rows came from third-party one-key tools and are gated on the kernel
+  families those tools were built for. A payload whose own fingerprint check fails prints
+  `TARGET_PROFILE_GATE_FAIL` and stops without touching the kernel — that is the expected answer on
+  any other build, not a bug in the row.
 
   In every case `ksud` is handed to the payload (or staged for it) so KernelSU comes up right after
   root, and the manager is opened when the handoff reports success. If no manager is installed, the

@@ -51,6 +51,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.hexo141.liquidglass.R
 import com.hexo141.liquidglass.consent.LicenseText
+import com.hexo141.liquidglass.i18n.AppLanguage
+import com.hexo141.liquidglass.i18n.LocaleManager
 
 /**
  * First-start gate: two documents, accepted one after the other, with a progress bar on top.
@@ -75,11 +77,19 @@ fun ConsentScreen(
     var licenseAccepted by remember { mutableStateOf(false) }
     var disclaimerAccepted by remember { mutableStateOf(false) }
 
-    val disclaimer = remember {
-        runCatching {
-            context.assets.open(DISCLAIMER_ASSET).bufferedReader().use { it.readText() }
-        }.getOrDefault("")
+    // The Chinese copies are reference translations: the English text keeps legal force, so the
+    // reader can flip back to it at any time. Default follows the UI language.
+    val uiIsChinese = remember {
+        val chosen = LocaleManager.current(context)
+        chosen == AppLanguage.CHINESE ||
+            (chosen == AppLanguage.SYSTEM &&
+                context.resources.configuration.locales[0].language == "zh")
     }
+    var showChinese by remember { mutableStateOf(uiIsChinese) }
+
+    // English disclaimer ships in the APK; the Chinese one is a bundled translation.
+    val disclaimerOriginal = remember { readAsset(context, DISCLAIMER_ASSET) }
+    val disclaimerTranslation = remember { readAsset(context, DISCLAIMER_ASSET_ZH) }
 
     // Blocking download on a worker thread; the UI shows the loading line meanwhile.
     LaunchedEffect(Unit) {
@@ -90,11 +100,19 @@ fun ConsentScreen(
         }, "gpl-fetch").start()
     }
 
+    // GPL reference translation, read only when the reader asks for Chinese.
+    val licenseChinese = remember(showChinese) {
+        if (showChinese) readAsset(context, GPL_ASSET_ZH) else ""
+    }
+
     val onLicenseStep = step == 0
-    val document = if (onLicenseStep) license?.text.orEmpty() else disclaimer
+    val englishDocument = if (onLicenseStep) license?.text.orEmpty() else disclaimerOriginal
+    val chineseDocument = if (onLicenseStep) licenseChinese else disclaimerTranslation
+    val usingTranslation = showChinese && chineseDocument.isNotEmpty()
+    val document = if (usingTranslation) chineseDocument else englishDocument
     val lines = remember(document) { document.lines() }
     val acceptedHere = if (onLicenseStep) licenseAccepted else disclaimerAccepted
-    val readyHere = if (onLicenseStep) license != null else disclaimer.isNotEmpty()
+    val readyHere = document.isNotEmpty()
 
     val progress by animateFloatAsState(
         targetValue = if (onLicenseStep) 0.5f else 1f,
@@ -130,7 +148,7 @@ fun ConsentScreen(
                 )
                 Spacer(Modifier.weight(1f))
                 BasicText(
-                    text = "Step ${step + 1} of 2",
+                    text = stringResource(R.string.consent_step, step + 1),
                     style = TextStyle(
                         color = Color.White.copy(alpha = 0.6f),
                         fontSize = 12.sp
@@ -159,9 +177,9 @@ fun ConsentScreen(
 
             BasicText(
                 text = if (onLicenseStep) {
-                    "Document 1 of 2 · licence of this software"
+                    stringResource(R.string.consent_doc1_hint)
                 } else {
-                    "Document 2 of 2 · what temporary root means for your device"
+                    stringResource(R.string.consent_doc2_hint)
                 },
                 style = TextStyle(
                     color = Color.White.copy(alpha = 0.72f),
@@ -169,6 +187,22 @@ fun ConsentScreen(
                     lineHeight = 16.sp
                 )
             )
+            Spacer(Modifier.height(8.dp))
+
+            // The English text is the one with legal force; the Chinese copy is a reference and
+            // says so at the top. This pill lets the reader flip between them at any time.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LanguagePill(
+                    label = stringResource(R.string.consent_lang_english),
+                    selected = !usingTranslation,
+                    onClick = { showChinese = false }
+                )
+                LanguagePill(
+                    label = stringResource(R.string.consent_lang_chinese),
+                    selected = usingTranslation,
+                    onClick = { showChinese = true }
+                )
+            }
             Spacer(Modifier.height(10.dp))
 
             // key(step) gives each document its own scroll position, starting at the top.
@@ -198,8 +232,9 @@ fun ConsentScreen(
                     BasicText(
                         text = when {
                             !onLicenseStep -> stringResource(R.string.consent_license_hint)
-                            license == null -> "Fetching the licence text from both mirrors…"
-                            else -> "Text source: ${license?.source}"
+                            license == null -> stringResource(R.string.consent_fetching)
+                            usingTranslation -> stringResource(R.string.consent_reference_notice)
+                            else -> stringResource(R.string.consent_text_source, license?.source.orEmpty())
                         },
                         style = TextStyle(
                             color = Color.White.copy(alpha = 0.5f),
@@ -311,8 +346,43 @@ fun ConsentScreen(
 }
 
 private const val DISCLAIMER_ASSET = "licenses/temporary-root-disclaimer.txt"
+private const val DISCLAIMER_ASSET_ZH = "licenses/zh-CN/temporary-root-disclaimer.txt"
+private const val GPL_ASSET_ZH = "licenses/zh-CN/gpl-3.0.txt"
 
 private val ConsentAccent = Color(0xFF0A84FF)
+
+/** Reads a bundled asset, returning "" when it is missing so the screen still renders. */
+private fun readAsset(context: android.content.Context, name: String): String =
+    runCatching {
+        context.assets.open(name).bufferedReader().use { it.readText() }
+    }.getOrDefault("")
+
+/** Small capsule used to flip between the English original and the Chinese reference text. */
+@Composable
+private fun LanguagePill(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .height(28.dp)
+            .clip(RoundedCornerShape(percent = 50))
+            .background(if (selected) ConsentAccent else Color.White.copy(alpha = 0.10f))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        BasicText(
+            text = label,
+            style = TextStyle(
+                color = Color.White.copy(alpha = if (selected) 1f else 0.65f),
+                fontSize = 11.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+            )
+        )
+    }
+}
 
 /** Square checkbox drawn by hand; the app does not pull in Material for anything else. */
 @Composable

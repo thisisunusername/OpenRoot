@@ -214,4 +214,31 @@
     <string name="vivo_kernel_unknown">kernel unknown</string>
     <string name="vivo_select_payload">Select payload</string>
     <string name="vivo_close">Close</string>
+    <!-- First-start language picker -->
+    <string name="welcome_title">Choose your language</string>
+    <string name="welcome_subtitle">You can change this later in About.</string>
+    <string name="welcome_english">English</string>
+    <string name="welcome_chinese">简体中文</string>
+    <string name="welcome_system">Follow system</string>
+    <string name="welcome_system_hint">Use the language your device is set to</string>
+    <string name="welcome_continue">Continue</string>
+
+    <!-- Consent: document switching -->
+    <string name="consent_step">Step %1$d of 2</string>
+    <string name="consent_doc1_hint">Document 1 of 2 · licence of this software</string>
+    <string name="consent_doc2_hint">Document 2 of 2 · what temporary root means for your device</string>
+    <string name="consent_lang_english">English</string>
+    <string name="consent_lang_chinese">简体中文</string>
+    <string name="consent_fetching">Fetching the licence text from both mirrors…</string>
+    <string name="consent_text_source">Text source: %1$s</string>
+    <string name="consent_reference_notice">Chinese reference translation · the English original is authoritative</string>
+
+    <!-- Third-party licences -->
+    <string name="about_licenses">Third-party licences</string>
+    <string name="licenses_title">Licences</string>
+    <string name="licenses_back">Back</string>
+    <string name="licenses_show_english">English</string>
+    <string name="licenses_show_chinese">简体中文</string>
+    <string name="licenses_reference">Reference translation only. The English original is the binding text.</string>
+    <string name="licenses_unavailable">This licence text is not bundled with this build.</string>
 </resources>

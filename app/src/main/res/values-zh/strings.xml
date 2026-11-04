@@ -215,4 +215,31 @@
     <string name="vivo_kernel_unknown">内核未知</string>
     <string name="vivo_select_payload">选择载荷</string>
     <string name="vivo_close">关闭</string>
+    <!-- 首次启动选择语言 -->
+    <string name="welcome_title">选择语言</string>
+    <string name="welcome_subtitle">之后可以在「关于」里随时修改。</string>
+    <string name="welcome_english">English</string>
+    <string name="welcome_chinese">简体中文</string>
+    <string name="welcome_system">跟随系统</string>
+    <string name="welcome_system_hint">使用设备当前设置的语言</string>
+    <string name="welcome_continue">继续</string>
+
+    <!-- 协议：切换 -->
+    <string name="consent_step">第 %1$d 步，共 2 步</string>
+    <string name="consent_doc1_hint">文档 1/2 · 本软件的许可证</string>
+    <string name="consent_doc2_hint">文档 2/2 · 临时 root 对你设备意味着什么</string>
+    <string name="consent_lang_english">English</string>
+    <string name="consent_lang_chinese">简体中文</string>
+    <string name="consent_fetching">正在从两个镜像获取许可证正文…</string>
+    <string name="consent_text_source">文本来源：%1$s</string>
+    <string name="consent_reference_notice">中文参考译文 · 以英文原文为准</string>
+
+    <!-- 第三方许可 -->
+    <string name="about_licenses">第三方许可</string>
+    <string name="licenses_title">许可证</string>
+    <string name="licenses_back">返回</string>
+    <string name="licenses_show_english">English</string>
+    <string name="licenses_show_chinese">简体中文</string>
+    <string name="licenses_reference">仅为参考译文，具有约束力的是英文原文。</string>
+    <string name="licenses_unavailable">本构建未内置该许可证文本。</string>
 </resources>

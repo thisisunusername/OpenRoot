@@ -68,6 +68,14 @@ class MainActivity : AppCompatActivity() {
         const val ENGINE_CVE_43284 = "cve-2026-43284"
         /** CVE-2020-0041: binder out-of-bounds write, the 5.4 / 5.4-qgki engine. */
         const val ENGINE_CVE_0041 = "cve-2020-0041"
+        /**
+         * The three Shark ports. They keep their own ids because each one is a separate payload
+         * built against one kernel family, not an alternative build of an engine above: the
+         * CVE-2026-64560 row here and [ENGINE_CVE_64560] share a CVE but not a payload.
+         */
+        const val ENGINE_SHARK_64560 = "cve-2026-64560-shark"
+        const val ENGINE_SHARK_98260 = "cve-2026-98260-shark"
+        const val ENGINE_SHARK_61269 = "cve-2026-61269-shark"
 
         /** How long to wait for `_adb-tls-connect._tcp` before giving up on a direct connect. */
         const val CONNECT_TIMEOUT_MS = 6_000L
@@ -883,6 +891,39 @@ class MainActivity : AppCompatActivity() {
                 },
                 enabled = available.pageCache != null,
             ),
+            SharkRunner.Engine.CVE_64560.toChoice(info, noConnection, handoff),
+            SharkRunner.Engine.CVE_98260.toChoice(info, noConnection, handoff),
+            SharkRunner.Engine.CVE_61269.toChoice(info, noConnection, handoff),
+        )
+    }
+
+    /**
+     * One picker row for a Shark port.
+     *
+     * The row is disabled unless three things hold: a device is connected, the running kernel is in
+     * the family the port was built against, and the binaries made it into the APK. Every disabled
+     * state names the reason, so a 5.x device sees "built for 6.18" rather than a bare grey row.
+     */
+    private fun SharkRunner.Engine.toChoice(
+        info: DeviceInfo?,
+        noConnection: Boolean,
+        handoff: String,
+    ): ExploitChoice {
+        val kernel = info?.kernel.orEmpty()
+        val family = releasePrefixes.joinToString(" / ")
+        return ExploitChoice(
+            id = id,
+            title = label,
+            detail = when {
+                noConnection -> "Connect to adb first"
+                !matches(kernel) -> "Built for $family; this kernel is $kernel"
+                !SharkRunner.isPayloadPresent(this@MainActivity, this) ->
+                    "Payload not packaged for this ABI"
+                else -> "Runs the shark driver, $handoff"
+            },
+            enabled = info != null &&
+                matches(kernel) &&
+                SharkRunner.isPayloadPresent(this@MainActivity, this),
         )
     }
 
@@ -915,7 +956,18 @@ class MainActivity : AppCompatActivity() {
                 if (!BinderBombRunner.isSupported(this, info.kernel)) return
             ENGINE_CVE_64560 -> if (pctPayload == null) return
             ENGINE_CVE_21479 -> if (gpuPayload == null) return
-            else -> if (!DirtyFragRunner.isSupported(info.androidRelease, info.kernel)) return
+            else -> {
+                // The three Shark ports share nothing but the driver shape: each one names its own
+                // kernel family, and the runner refuses a mismatch before anything is pushed.
+                val shark = SharkRunner.Engine.ofId(engineId)
+                if (shark != null) {
+                    if (!shark.matches(info.kernel) || !SharkRunner.isPayloadPresent(this, shark)) {
+                        return
+                    }
+                } else if (!DirtyFragRunner.isSupported(info.androidRelease, info.kernel)) {
+                    return
+                }
+            }
         }
 
         exploiting.value = true
@@ -931,11 +983,13 @@ class MainActivity : AppCompatActivity() {
             val outcome = runCatching {
                 val ksud = KsuManager.resolve(this, AdbConnectionManager.get(this), ::logLine)
                     ?.takeIf { it.packageName.isNotEmpty() }
+                val shark = SharkRunner.Engine.ofId(engineId)
                 when {
                     engineId == ENGINE_CVE_43499 -> runProfileEngine(info, ksud)
                     engineId == ENGINE_CVE_0041 -> runBinderEngine(info, ksud)
                     pctPayload != null -> runPctEngine(info, pctPayload, ksud)
                     gpuPayload != null -> runGpuEngine(info, gpuPayload, ksud)
+                    shark != null -> runSharkEngine(info, shark, ksud)
                     else -> runPageCacheEngine(
                         info = info,
                         ksud = ksud,
@@ -1062,6 +1116,47 @@ class MainActivity : AppCompatActivity() {
         }
         ExploitMemory.record(this, info.kernel, result.handoff.rooted, ExploitMemory.ENGINE_PCT)
         return reportHandoff(ksud, result.handoff, result.exitCode)
+    }
+
+    /**
+     * One Shark port: stage its binaries, run the shipped driver, report what it said.
+     *
+     * The driver owns the whole flow, including the KernelSU handoff, so this engine does not try to
+     * interpret progress. Success is decided the way the driver reports it: the last `[6/6]` step
+     * ends with `id` printing `uid=0`.
+     */
+    private fun runSharkEngine(
+        info: DeviceInfo,
+        engine: SharkRunner.Engine,
+        ksud: KsuManager.Target?,
+    ): String {
+        val result = SharkRunner.run(
+            context = this,
+            manager = AdbConnectionManager.get(this),
+            engine = engine,
+            info = info,
+            ksudPath = ksud?.ksudPath,
+            onLine = ::logLine,
+        )
+        if (result.refused) {
+            return getString(R.string.exploit_exit_code, result.exitCode)
+        }
+        val rooted = result.output.lineSequence().any { it.contains("uid=0") }
+        ExploitMemory.record(this, info.kernel, rooted, engine.id)
+        if (!rooted) return getString(R.string.exploit_exit_code, result.exitCode)
+        // The driver already tried its own late-load and manager install; all that is left is to
+        // surface whichever surface the user ends up with, the same way every other engine does.
+        if (ksud == null) {
+            runOnUiThread { commandMode.value = true }
+            return getString(R.string.exploit_root_ready)
+        }
+        val opened = KsuManager.launchWithRetry(
+            context = this,
+            manager = AdbConnectionManager.get(this),
+            packageName = ksud.packageName,
+            log = ::logLine,
+        )
+        return getString(if (opened) R.string.exploit_ksu_opened else R.string.exploit_ksu_manual)
     }
 
     /** CVE-2026-43284: the module is loaded by the kernel; bootstrap and ksud are staged over ADB. */

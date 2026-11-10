@@ -35,8 +35,15 @@ OUT := $(BUILD_DIR)
 TARGET := $(OUT)/libghostlock54.so
 SRC := ghostlock54.c
 
-CFLAGS := -O2 -fPIE -fPIC -Wall -Wextra -Wno-unused-parameter -D_GNU_SOURCE -pthread
-LDFLAGS := -pie -pthread
+# Files:
+# `libghostlock54.so` is an *executable* with a library name, not a shared object: the payload has a
+# `main()`, it is run as a program, and Android only unpacks `lib*.so` out of jniLibs. So it is built
+# with `-fPIE -pie` (an executable) and deliberately not with `-shared`/`-fPIC`, which would produce a
+# shared object with no entry point that the runner could not exec. Nothing links against it.
+CFLAGS := -O2 -fPIE -Wall -Wextra -Wno-unused-parameter -D_GNU_SOURCE -pthread
+# `max-page-size=16384`: Android 15+ on arm64 boots with 16 KB pages, and a payload linked for 4 KB
+# segalign refuses to load there. Every other payload in this repo pins the same value.
+LDFLAGS := -pie -pthread -Wl,-z,max-page-size=16384
 
 all: $(TARGET)
 

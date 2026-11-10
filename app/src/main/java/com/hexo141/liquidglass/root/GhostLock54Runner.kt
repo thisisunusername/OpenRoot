@@ -121,7 +121,7 @@ object GhostLock54Runner {
     fun isPayloadPresent(context: Context): Boolean {
         val payload = File(context.applicationInfo.nativeLibraryDir, PAYLOAD).isFile
         val module = runCatching {
-            context.assets.open(MODULE_ASSET).use { it.read() }.isNotEmpty()
+            context.assets.open(MODULE_ASSET).use { it.readBytes() }.isNotEmpty()
         }.getOrDefault(false)
         return payload && module
     }

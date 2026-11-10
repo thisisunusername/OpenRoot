@@ -244,7 +244,12 @@ val buildNativeGhost54 = tasks.register<Exec>("buildNativeGhost54") {
     commandLine(ndkMake, "all", "-j4")
     environment("NDK_ROOT", ndkDir)
     inputs.dir(rootProject.layout.projectDirectory.dir("native-ghost54"))
-    outputs.dir(layout.buildDirectory.dir("ghost54"))
+    // The Makefile writes to `../build/ghost54`, which resolves against the working directory above,
+    // i.e. the *root* project's build dir. Declaring `layout.buildDirectory` here would name the app
+    // module's directory instead, Gradle would consider the output already produced and empty, and
+    // the copy step would silently package nothing — which is exactly what CI reported as
+    // `llvm-strip: .../jniLibs/arm64-v8a/libghostlock54.so: No such file or directory`.
+    outputs.dir(rootProject.layout.buildDirectory.dir("ghost54"))
 }
 
 /**
@@ -272,7 +277,8 @@ val prepareNativePayloads = tasks.register<Copy>("prepareNativePayloads") {
     }
     // GhostLock54 is packaged under a library name for the same reason binder54 is:
     // Android only unpacks `lib*.so` out of jniLibs, and the runner execs it as a file.
-    from(layout.buildDirectory.dir("ghost54")) {
+    // Sourced from the root project's build dir, because that is where the Makefile writes.
+    from(rootProject.layout.buildDirectory.dir("ghost54")) {
         include("libghostlock54.so")
     }
     // Android only unpacks `lib*.so` from jniLibs, so the executable is packaged under a library

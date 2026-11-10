@@ -29,7 +29,7 @@ Shizuku is installed and authorised, OpenRoot never needs a pairing code at all.
   build props.
 - **Kernel support status.** The main screen reports whether the connected kernel has a bundled
   profile.
-- **Temporary root, ten engines across eight CVE ids.** The picker lists one row per engine; the
+- **Temporary root, twelve engines across ten CVE ids.** The picker lists one row per engine; the
   build that fits the connected device is selected after the row is chosen, so no row is tied to a
   single device. On an arm64 device the app picks whichever engine can run:
   - **CVE-2026-43499** (futex PI UAF): the payload and a profile matching the exact `uname -r` are
@@ -78,6 +78,43 @@ Shizuku is installed and authorised, OpenRoot never needs a pairing code at all.
     that can really answer that — but the row says "expect a failure" instead of pretending. The
     32/64-bit half is taken from `ro.product.cpu.abilist`, because `mtk-su32` and `mtk-su64` are
     different binaries and the wrong one only ever fails with `exec format error`.
+  - **CVE-2024-31317 (zygote argument injection) — a prerequisite, not a root.** This row is in the
+    picker because it is the only one that changes what a later engine can do, and the row says so
+    in its own title. It writes `Settings.Global.hidden_api_blacklist_exemptions` with forged zygote
+    arguments (`--setuid=`, `--seinfo=`, `--invoke-with`) and launches an app to make zygote fork
+    with them. What comes out is code running as `system` (`u:r:system_app:s0`) — **System privileges
+    only, never root** — and the row never reports "rooted" because it never is.
+
+    Two things make it safe to ship: it only works on Android 12-13 whose security patch predates
+    June 2024, so the row disables itself outside that window instead of failing after a write; and
+    the dangerous key is restored in a `finally` block, unconditionally, because a malformed value
+    left in that key is how a device stops booting. The upstream reference clears it 200 ms later and
+    hopes; this waits for the payload's own marker and restores either way. Gated engines read that
+    marker, not the mere absence of an exception.
+
+    Upstream: <https://github.com/wqry085/PoC-Deployer-System>
+  - **CVE-2026-49881 + CVE-2026-43284 (LSPromise)**: one row, because neither half does anything
+    alone. 49881 is an Android 17 Telecom logic bug that runs Java inside `system_server` without any
+    extra privilege; 43284 is the same page-cache write listed above, but SELinux only grants
+    `netlink_xfrm_socket` to `system_server`, `network_stack` and `netd`. So the chain has to be:
+    49881 reaches `system_server`, injects into `com.android.networkstack`, and the DirtyFrag write
+    runs from there. The separate **CVE-2026-43284** row above stays exactly as it was — it is the
+    page-cache engine for kernels reached another way, not an earlier version of this one.
+
+    It requires Android 17, KernelSU installed (the last step borrows `libksud.so` from it), and a
+    kernel whose vermagic matches the bundled module (`6.6.127-4k-g46a034eca005-dirty`). The 6.1
+    trees are unsupported upstream, and a mismatch is silent: `init_module` refuses the module before
+    anything in it runs, which is why the row compares the running `uname -r` against the module's own
+    vermagic and says so rather than loading and hoping.
+
+    One honest limit: the published chain needs Java objects that only exist inside the app process
+    (a registered `PhoneAccount`, an `AppComponentFactory` that `Shellcode` loads into, a
+    `BroadcastReceiver` to hand the networkstack binder back). The app stages the three payloads and
+    starts `shelld`, then reports that the `system_server` half cannot be driven over ADB — because a
+    `shelld` started as the shell user inherits the `shell` label, which cannot open an xfrm socket.
+    That is a model limit, stated, not a failure dressed up as one.
+
+    Upstream: <https://github.com/LSPosed/LSPromise>
 
     Because this engine deploys Magisk rather than KernelSU, it is paired with the legacy manager
     described below. Its payload is bundled verbatim from `JunioJsv/mtk-easy-su` (`mtk-su32/64`,
@@ -347,6 +384,8 @@ app/src/main/java/com/hexo141/liquidglass/
   root/       payload push and execution
               MtkEasySu.kt     MediaTek bootless path: probe, stage, run
               MagiskManager.kt the two Magisk managers and their pairing
+              Zygote31317.kt   CVE-2024-31317 prerequisite: window probe, inject, restore
+              LSPromise.kt     CVE-2026-49881 + CVE-2026-43284: vermagic gate, stage, run
   ui/         liquid glass components and screens
 native/       arm64 payload sources for CVE-2026-43499 (Makefile)
 native-or/    arm64 payload sources for CVE-2026-43284 (Makefile)
@@ -358,6 +397,7 @@ native-pct/   arm64 payload sources for CVE-2026-64560 (Makefile)
 docs/         vulnerability write-ups (CVE-2026-64560)
 app/src/main/assets/kernel_profiles/   bundled kernel profiles
 app/src/main/assets/mtk/               MediaTek payload, bundled from mtk-easy-su
+app/src/main/assets/lspromise/         LSPromise payload, bundled from LSPosed/LSPromise
 ```
 
 ## Links
@@ -371,6 +411,8 @@ app/src/main/assets/mtk/               MediaTek payload, bundled from mtk-easy-s
 - CVE-2020-0069 upstream: <https://github.com/JunioJsv/mtk-easy-su>
 - CVE-2020-0069 (`mtk-su`): <https://forum.xda-developers.com/t/amazing-temp-root-for-mediatek-armv8-2020-08-24.3922213/>
 - CVE-2020-0069 background: <https://www.xda-developers.com/mediatek-su-rootkit-exploit/>
+- CVE-2024-31317 upstream: <https://github.com/wqry085/PoC-Deployer-System>
+- CVE-2026-49881 + CVE-2026-43284 (LSPromise) upstream: <https://github.com/LSPosed/LSPromise>
 - Magisk upstream: <https://github.com/topjohnwu/Magisk>
 
 ## Continuous integration

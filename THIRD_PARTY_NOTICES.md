@@ -103,6 +103,39 @@ free-to-use temporary-root tool. Neither project relicense the other.
 Note that `magiskinit32/64` are old binaries on purpose: they pair with Magisk 20.4, and that pairing
 is what the legacy Magisk manager (documented in `README.md`) expects.
 
+## CVE-2024-31317 reference (no code bundled)
+
+`app/src/main/java/com/hexo141/liquidglass/root/Zygote31317.kt` is written against
+[`wqry085/PoC-Deployer-System`](https://github.com/wqry085/PoC-Deployer-System), which documents the
+settings-key mechanism this app reimplements.
+
+**No file from that repository is copied into this tree.** The Kotlin is independent: it builds the
+argument string itself, grants `WRITE_SECURE_SETTINGS` through `pm grant` rather than a
+ContentProvider insert, waits for a marker file instead of sleeping 200 ms, and restores the
+original value in a `finally` block rather than clearing it on a timer. What comes from upstream is
+the understanding of the bug, which is described publicly in it and in the CVE itself.
+
+## LSPromise payload (CVE-2026-49881 + CVE-2026-43284)
+
+`app/src/main/assets/lspromise/` holds three files taken verbatim from
+[`LSPosed/LSPromise`](https://github.com/LSPosed/LSPromise) (`app/src/main/jni/`):
+
+| File | Bytes | What it is |
+| --- | --- | --- |
+| `shelld` | 18 552 | the command daemon: listens on an abstract unix socket, `exec`s what it is handed, inheriting its parent's SELinux label |
+| `splicehelper` | 1 904 | the helper that performs the page-cache write through splice |
+| `dirtyfrag.ko` | 12 096 | the kernel module, `vermagic=6.6.127-4k-g46a034eca005-dirty SMP preempt mod_unload modversions aarch64` |
+
+They are copied byte for byte and are **not** rebuilt from source here. The module's vermagic is why
+`LSPromise.probe` compares it against the running `uname -r`: a module built for a different tree is
+refused by `init_module` before any of its code runs, and the refusal looks like a silent no-op from
+the app's side.
+
+The rest of that repository — `exp.c`, `stage1.S`, `elf_parser.c`, the `Shellcode` /
+`MyAppComponentFactory` Java sources — is **not** bundled, because driving that chain to completion
+needs Java objects that only exist inside the app process (see `README.md`, where that limit is
+stated). `LSPromise` is published by the LSPosed organisation as a proof-of-concept exploit chain.
+
 ## Bundled wallpaper
 
 `app/src/main/res/drawable-nodpi/bg.jpg` was provided by the user of this project (from a local

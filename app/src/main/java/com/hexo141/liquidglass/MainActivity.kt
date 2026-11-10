@@ -40,6 +40,7 @@ import com.hexo141.liquidglass.root.GhostLockRunner
 import com.hexo141.liquidglass.root.GpuRunner
 import com.hexo141.liquidglass.root.JokerRunner
 import com.hexo141.liquidglass.root.KsuManager
+import com.hexo141.liquidglass.root.LSPromise
 import com.hexo141.liquidglass.root.MagiskManager
 import com.hexo141.liquidglass.root.MtkEasySu
 import com.hexo141.liquidglass.root.PctRunner
@@ -47,6 +48,7 @@ import com.hexo141.liquidglass.root.RootExploit
 import com.hexo141.liquidglass.root.RootHandoff
 import com.hexo141.liquidglass.root.SharkRunner
 import com.hexo141.liquidglass.root.RootShell
+import com.hexo141.liquidglass.root.Zygote31317
 import com.hexo141.liquidglass.ui.ConsentScreen
 import com.hexo141.liquidglass.ui.ConsentTransition
 import com.hexo141.liquidglass.ui.LicensesScreen
@@ -101,6 +103,25 @@ class MainActivity : AppCompatActivity() {
          * reboot, and the only one that deploys Magisk instead of KernelSU.
          */
         const val ENGINE_MEDIATEK = "mediatek-mtk-su"
+
+        /**
+         * CVE-2024-31317: zygote argument injection, listed as a **prerequisite**, not as root.
+         *
+         * It is in the picker because it is the only row that changes what a later engine can do:
+         * it puts code in `system_app`, and engines that need a privileged caller refuse to run
+         * until [zygoteReady] reports it took. It never shows "rooted", because it never is.
+         */
+        const val ENGINE_ZYGOTE_31317 = "cve-2024-31317"
+
+        /**
+         * LSPromise: CVE-2026-49881 then CVE-2026-43284.
+         *
+         * One row rather than two because neither half does anything alone — 49881 reaches
+         * `system_server`, 43284 needs a domain that may open an xfrm socket, and the chain is what
+         * connects them. [ENGINE_CVE_43284] stays a separate row: it is the page-cache engine for
+         * kernels reached another way, not an earlier version of this one.
+         */
+        const val ENGINE_LSPROMISE = "lspromise-49881-43284"
 
         /** Kernel family the JokerLock port was built against; shown when it does not match. */
         const val JOKER_FAMILY = "6.6.118-android15-8 oplus GKI"
@@ -209,6 +230,25 @@ class MainActivity : AppCompatActivity() {
      * commands every recomposition.
      */
     private val mtkProbe = mutableStateOf<MtkEasySu.Probe?>(null)
+
+    /**
+     * Last CVE-2024-31317 window probe, or `null` before the first one.
+     *
+     * Its answer decides whether the gated engines are usable, so it is kept as state rather than
+     * read on demand: a recomposition must not shell out, and the row's own text depends on it.
+     */
+    private val zygoteProbe = mutableStateOf<Zygote31317.Probe?>(null)
+
+    /**
+     * Whether 31317 actually ran on this device during this session.
+     *
+     * Separate from [zygoteProbe] on purpose: being in the vulnerable window is not the same as
+     * having injected successfully, and only the second one may unlock a gated engine.
+     */
+    private val zygoteReady = mutableStateOf(false)
+
+    /** Last LSPromise prerequisite probe, or `null` before the first one. */
+    private val lspromiseProbe = mutableStateOf<LSPromise.Probe?>(null)
 
     /** Active bottom-bar tab: 0 home, 1 vivo/iQOO OTG, 2 exploit log, 3 about. */
     private val selectedTab = mutableStateOf(0)
@@ -324,6 +364,11 @@ class MainActivity : AppCompatActivity() {
         consentAccepted.value = ConsentStore.isAccepted(this)
         // Started as `true` so the screen never flashes before the preference is read.
         languageChosen.value = LocaleManager.hasChosen(this)
+
+        /* CVE-2024-31317 grants WRITE_SECURE_SETTINGS to this package by name, so the root code
+         * needs the name without having to hold a Context. Set once here, before any engine could
+         * possibly run, because an empty value makes `inject` refuse rather than grant to nobody. */
+        Zygote31317.appPackage = packageName
 
         // Shizuku listeners: the binder can arrive late (Shizuku started after this app) and the
         // user can grant access at any moment, so the connection state is re-evaluated on each event.
@@ -890,6 +935,19 @@ class MainActivity : AppCompatActivity() {
                     Log.i(TAG, "mtk probe: $line")
                 }
                 runOnUiThread { mtkProbe.value = probe }
+
+                /* Both new probes are property reads plus one file check, so they ride along with the
+                 * connect instead of waiting for the picker: the 31317 row's disabled text and the
+                 * LSPromise row's vermagic note both need to be right the instant it opens. */
+                val zygote = Zygote31317.probe(AdbConnectionManager.get(this)) { line ->
+                    Log.i(TAG, "31317 probe: $line")
+                }
+                runOnUiThread { zygoteProbe.value = zygote }
+
+                val lspromise = LSPromise.probe(AdbConnectionManager.get(this)) { line ->
+                    Log.i(TAG, "lspromise probe: $line")
+                }
+                runOnUiThread { lspromiseProbe.value = lspromise }
             }
         }, "adb-device-info").start()
     }
@@ -1079,6 +1137,41 @@ class MainActivity : AppCompatActivity() {
                 },
                 enabled = info != null && (mtkProbe.value?.supported ?: false),
             ),
+            /*
+             * CVE-2024-31317 is the one row that does not claim root, and the text says so twice:
+             * in the title (marked as a prerequisite) and in the ready detail (system only). A user
+             * who picks it and expects `su` would otherwise think it failed.
+             */
+            ExploitChoice(
+                id = ENGINE_ZYGOTE_31317,
+                title = getString(R.string.engine_zygote_31317),
+                detail = when {
+                    noConnection -> getString(R.string.engine_connect_first)
+                    zygoteProbe.value == null -> getString(R.string.engine_connect_first)
+                    zygoteReady.value -> getString(R.string.zygote_31317_ran)
+                    zygoteProbe.value!!.canInject -> getString(R.string.zygote_31317_ready)
+                    else -> zygoteProbe.value!!.detail
+                },
+                enabled = info != null && zygoteProbe.value?.canInject == true,
+            ),
+            /*
+             * LSPromise is gated on its own prerequisites only, not on 31317: it is a complete chain
+             * that starts from an ordinary app, so requiring the zygote bug first would be wrong.
+             */
+            ExploitChoice(
+                id = ENGINE_LSPROMISE,
+                title = getString(R.string.engine_lspromise),
+                detail = when {
+                    noConnection -> getString(R.string.engine_connect_first)
+                    lspromiseProbe.value == null -> getString(R.string.engine_connect_first)
+                    !LSPromise.isPayloadPresent(this) ->
+                        getString(R.string.engine_payload_not_packaged)
+                    else -> lspromiseProbe.value!!.detail
+                },
+                enabled = info != null &&
+                    lspromiseProbe.value?.canRun == true &&
+                    LSPromise.isPayloadPresent(this),
+            ),
         )
     }
 
@@ -1143,6 +1236,11 @@ class MainActivity : AppCompatActivity() {
                 if (!JokerRunner.isSupported(info.kernel) || !JokerRunner.isPayloadPresent(this)) {
                     return
                 }
+            // Neither new engine is a page cache write, so neither may fall through to the
+            // DirtyFrag default below: they are handled by their own branches in the worker.
+            ENGINE_ZYGOTE_31317 -> if (zygoteProbe.value?.canInject != true) return
+            ENGINE_LSPROMISE ->
+                if (lspromiseProbe.value?.canRun != true || !LSPromise.isPayloadPresent(this)) return
             else -> {
                 // The three Shark ports share nothing but the driver shape: each one names its own
                 // kernel family, and the runner refuses a mismatch before anything is pushed.
@@ -1194,6 +1292,8 @@ class MainActivity : AppCompatActivity() {
                      * resolution above: it deploys Magisk, not ksud, so a manager scan would be
                      * both pointless and misleading in the log. */
                     engineId == ENGINE_MEDIATEK -> runMediatekEngine()
+                    engineId == ENGINE_ZYGOTE_31317 -> runZygoteEngine()
+                    engineId == ENGINE_LSPROMISE -> runLSPromiseEngine()
                     engineId == ENGINE_CVE_43499 -> runProfileEngine(info, ksud)
                     engineId == ENGINE_CVE_0041 -> runBinderEngine(info, ksud)
                     engineId == ENGINE_JOKER_OGKI -> runJokerEngine(info, ksud)
@@ -1270,6 +1370,77 @@ class MainActivity : AppCompatActivity() {
             handoff = RootHandoff.probe(manager, ::logLine, waitMs = 8_000),
             exitCode = 0,
         )
+    }
+
+    /**
+     * CVE-2024-31317: the prerequisite row.
+     *
+     * It returns a sentence, never a root report, because there is no root to report. What it does
+     * change is [zygoteReady], which is what unlocked rows read — and that is set only when the
+     * payload's own marker file appeared, not when the injection merely ran without throwing.
+     *
+     * The identity is fixed at `system` / `system_app`: that pair is the one every gated engine in
+     * this app was written against, and letting the user type a different `--seinfo=` would produce
+     * a process that cannot touch `/data/adb` in a way none of those engines expect.
+     */
+    private fun runZygoteEngine(): String {
+        val manager = AdbConnectionManager.get(this)
+        // The payload writes this file itself, so it is the one honest success signal available.
+        val marker = "/data/local/tmp/openroot/31317-ok"
+        val command = "mkdir -p /data/local/tmp/openroot; " +
+            "printf 'uid=%s\\nseinfo=%s\\n' \"\$(id -u)\" \"\$(cat /proc/self/attr/current)\" > $marker"
+
+        logLine("<i> ${getString(R.string.zygote_31317_injecting)}")
+        reportProgress(0.2f)
+        val ok = Zygote31317.inject(
+            manager = manager,
+            uid = 1000,
+            seinfo = "system_app",
+            command = command,
+            log = ::logLine,
+        )
+        reportProgress(1f)
+
+        runOnUiThread { zygoteReady.value = ok }
+        if (!ok) {
+            logLine("<e> ${getString(R.string.zygote_31317_failed)}")
+            return getString(R.string.zygote_31317_failed)
+        }
+        /* The key was already restored inside `inject`, so nothing is left behind to fix. Saying so
+         * is worth a line: a user who has read about 31317 expects the dangerous write, not the
+         * cleanup, and should know the device is back in its original state. */
+        logLine("<i> ${getString(R.string.zygote_31317_restored)}")
+        return getString(R.string.zygote_31317_ran)
+    }
+
+    /**
+     * LSPromise: stage the three payloads, then run the half ADB can run.
+     *
+     * The result sentence is deliberately not a failure message when the syscall is unreachable.
+     * Nothing broke: the chain needs Java-side objects that only exist in the app process, and this
+     * shell-driven model cannot create them. The log says which step is missing so the limit is
+     * visible rather than looking like a failed exploit.
+     */
+    private fun runLSPromiseEngine(): String {
+        val manager = AdbConnectionManager.get(this)
+        reportProgress(0.15f)
+        if (!LSPromise.pushAssets(this, manager, ::logLine)) {
+            return getString(R.string.lspromise_not_staged)
+        }
+
+        reportProgress(0.4f)
+        if (!LSPromise.prepare(manager, ::logLine)) {
+            return getString(R.string.lspromise_not_staged)
+        }
+
+        reportProgress(0.6f)
+        val result = LSPromise.run(manager, ::logLine)
+        reportProgress(1f)
+        return when {
+            result.syscallReachable -> getString(R.string.lspromise_reached)
+            result.daemonUp -> getString(R.string.lspromise_stopped, result.detail)
+            else -> result.detail
+        }
     }
 
     private fun runProfileEngine(info: DeviceInfo, ksud: KsuManager.Target?): String {

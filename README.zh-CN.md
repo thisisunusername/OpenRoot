@@ -22,7 +22,7 @@ OpenRoot 是一个 Android 应用，它通过**两种通道之一**连接设备�
 
 - **内核支持状态。** 主界面会报告已连接的内核是否有配套的 profile。
 
-- **临时 root，十个引擎，横跨八个 CVE 编号。** 选择器为每个引擎列一行；选定某一行后，才会挑选适配当前设备的构建，因此没有任何一行绑定到单一机型。在 arm64 设备上，应用会挑选能跑的那个引擎：
+- **临时 root，十二个引擎，横跨十个 CVE 编号。** 选择器为每个引擎列一行；选定某一行后，才会挑选适配当前设备的构建，因此没有任何一行绑定到单一机型。在 arm64 设备上，应用会挑选能跑的那个引擎：
 
   - **CVE-2026-43499**（futex PI UAF）：把载荷与匹配精确 `uname -r` 的 profile 推送到 `/data/local/tmp/openroot`，以 `shell` 用户执行。
 
@@ -44,6 +44,18 @@ OpenRoot 是一个 Android 应用，它通过**两种通道之一**连接设备�
     跑之前应用会先核对三件事：SoC 必须报告为联发科；命令队列节点（`/dev/mtk_cmdq` 及其同族）必须**能被 shell 用户打开**，而不只是存在；再拿构建的安全补丁级别与 2020 年 3 月的修复作比较。补丁更晚**不会**禁用这一行——真正能回答这个问题的只有载荷本身——但这一行会明说「大概率会失败」，而不是假装没事。32/64 位取自 `ro.product.cpu.abilist`，因为 `mtk-su32` 和 `mtk-su64` 是两个不同的二进制，选错只会得到 `exec format error`。
 
     由于这个引擎部署的是 Magisk 而不是 KernelSU，它配的是下文所述的老版管理器。它的载荷逐字节取自 `JunioJsv/mtk-easy-su`（`mtk-su32/64`、`magiskinit32/64`、`magisk-boot.sh`），见 `THIRD_PARTY_NOTICES.md`。
+  - **CVE-2024-31317（zygote 参数注入）——前置，不是 root。** 这一行出现在选择器里，是因为它是唯一一个会改变「后续引擎能做什么」的引擎，标题里就写明了这一点。它把伪造的 zygote 参数（`--setuid=`、`--seinfo=`、`--invoke-with`）写进 `Settings.Global.hidden_api_blacklist_exemptions`，再启动一个应用，让 zygote 带着这些参数 fork。产出是以 `system`（`u:r:system_app:s0`）身份运行的代码——**仅 System 权限，永远不是 root**——这一行从不上报「已 root」，因为它从来就不是。
+
+    有两件事让它敢被内置：它只在**安全补丁早于 2024 年 6 月**的 Android 12-13 上有效，窗口之外这一行会直接置灰，而不是写完才失败；那个危险的设置项会在 `finally` 里**无条件还原**，因为一旦把畸形值留在那个键里，设备就起不来了。上游参考实现是 200 ms 后重置然后听天由命；这里会等载荷自己写下的标记，无论成败都还原。被门禁的引擎读的是那个标记，而不是「没抛异常」。
+
+    上游：<https://github.com/wqry085/PoC-Deployer-System>
+  - **CVE-2026-49881 + CVE-2026-43284（LSPromise）**：合成一行，因为拆开后两半都做不成事。49881 是 Android 17 的 Telecom 逻辑漏洞，不需要任何额外权限就能在 `system_server` 里跑 Java；43284 就是上面那个 page cache 写入，但 SELinux 只把 `netlink_xfrm_socket` 授予 `system_server`、`network_stack` 和 `netd` 三个域。所以顺序只能是：49881 进 `system_server`，注入到 `com.android.networkstack`，DirtyFrag 的写入从那里发起。上面那一行**独立的 CVE-2026-43284 保持原样**——它是给「用别的方式够到 xfrm 的内核」准备的 page cache 引擎，不是这个引擎的旧版本。
+
+    它要求 Android 17、已安装 KernelSU（最后一步会借用它的 `libksud.so`），以及 vermagic 与内置模块（`6.6.127-4k-g46a034eca005-dirty`）匹配的内核。6.1 系列在上游明确不受支持，而这**种不匹配是静默的**：`init_module` 在模块里任何代码跑起来之前就拒绝了它，所以这一行会拿运行中的 `uname -r` 去比模块自己的 vermagic 并直接说明，而不是加载完再祈祷。
+
+    有一个必须讲清的边界：公开的这条链需要只存在于**应用进程内部**的 Java 对象（注册过的 `PhoneAccount`、让 `Shellcode` 被加载的 `AppComponentFactory`、把 networkstack binder 回传给应用用的 `BroadcastReceiver`）。本应用会把三个载荷推上设备并拉起 `shelld`，然后如实报告「`system_server` 这一半无法通过 ADB 驱动」——因为以 shell 用户启动的 `shelld` 继承的是 `shell` 标签，而该标签打不开 xfrm 套接字。这是**模型的边界，说明清楚**，不是把失败包装成别的说法。
+
+    上游：<https://github.com/LSPosed/LSPromise>
 
   Shark 和 JokerLock 这两行来自第三方一键工具，因此被限制在那些工具所针对的内核族上。如果某个载荷自身的指纹校验不通过，它会打印 `TARGET_PROFILE_GATE_FAIL` 并停下，完全不碰内核——在任何其他构建上这都是预期结果，不是这一行的 bug。
 
@@ -153,7 +165,7 @@ make -C native-pct payload      # 产出 build/pct/libpct-opace6.so
 
 ### 运行漏洞利用
 
-连接成功后，**提权**按钮会出现在日志区域上方（在通道建立前一直隐藏）。点它打开引擎选择器。它会列出十个 CVE 编号；某一行若不可用会说明原因（此内核没有 profile、没有移植版本、GPU 不受支持、没有模块镜像覆盖此内核、此 ABI 未打包载荷、不是联发科设备、命令队列节点不可打开）。选定某一行后，才会挑选适配当前设备的载荷。原生日志显示在屏幕底部。
+连接成功后，**提权**按钮会出现在日志区域上方（在通道建立前一直隐藏）。点它打开引擎选择器。它会列出十二行（其中 31317 是前置、不是 root）；某一行若不可用会说明原因（此内核没有 profile、没有移植版本、GPU 不受支持、没有模块镜像覆盖此内核、此 ABI 未打包载荷、不是联发科设备、命令队列节点不可打开）。选定某一行后，才会挑选适配当前设备的载荷。原生日志显示在屏幕底部。
 
 状态卡片会为已连接的设备显示 `支持`、`未验证` 或 `不支持`。
 
@@ -234,6 +246,8 @@ app/src/main/java/com/hexo141/liquidglass/
   device/     通过 ADB 读取的设备信息
   root/       载荷推送与执行
                 MtkEasySu.kt     联发科免解锁路径：探测、布置、运行
+                Zygote31317.kt   CVE-2024-31317 前置：窗口探测、注入、还原
+                LSPromise.kt     CVE-2026-49881 + CVE-2026-43284：vermagic 门禁、布置、运行
                 MagiskManager.kt 两个 Magisk 管理器及其配对关系
   ui/         液态玻璃组件与界面
 native/       CVE-2026-43499 的 arm64 载荷源码（Makefile）
@@ -246,6 +260,7 @@ native-pct/   CVE-2026-64560 的 arm64 载荷源码（Makefile）
 docs/         漏洞分析文档（CVE-2026-64560）
 app/src/main/assets/kernel_profiles/   内置内核 profile
 app/src/main/assets/mtk/               联发科载荷，取自 mtk-easy-su
+app/src/main/assets/lspromise/         LSPromise 载荷，取自 LSPosed/LSPromise
 ```
 
 ## 相关链接
@@ -259,6 +274,8 @@ app/src/main/assets/mtk/               联发科载荷，取自 mtk-easy-su
 - CVE-2020-0069 上游：<https://github.com/JunioJsv/mtk-easy-su>
 - CVE-2020-0069（`mtk-su`）：<https://forum.xda-developers.com/t/amazing-temp-root-for-mediatek-armv8-2020-08-24.3922213/>
 - CVE-2020-0069 背景：<https://www.xda-developers.com/mediatek-su-rootkit-exploit/>
+- CVE-2024-31317 上游：<https://github.com/wqry085/PoC-Deployer-System>
+- CVE-2026-49881 + CVE-2026-43284（LSPromise）上游：<https://github.com/LSPosed/LSPromise>
 - Magisk 上游：<https://github.com/topjohnwu/Magisk>
 
 ## 持续集成

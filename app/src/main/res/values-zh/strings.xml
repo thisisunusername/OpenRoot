@@ -75,6 +75,27 @@
     <string name="exploit_root_ready">临时 root 已就绪，可在下方输入命令</string>
     <string name="exploit_profile_gate_failed">此版本不是 payload 所移植的目标版本</string>
 
+    <!-- Magisk 降级：没有匹配此内核的 kernelSU 模块 -->
+    <string name="exploit_magisk_ready">已取得临时 root，正在加载 Magisk</string>
+    <string name="exploit_magisk_legacy_ready">已取得临时 root，正在加载 Magisk 20.4（联发科）</string>
+    <string name="magisk_card_title">Magisk 管理器</string>
+    <string name="magisk_card_body_legacy">本次通过联发科 payload 加载了 Magisk 20.4。不要更新它：新版管理器会要求升级 Magisk，而在 BL 锁定的设备上这么做会变砖。</string>
+    <string name="magisk_card_body_modern">本次加载的是现代 Magisk payload，使用当前版本的管理器即可。</string>
+    <string name="magisk_card_install">安装 %1$s</string>
+    <string name="magisk_card_installed">已安装 %1$s</string>
+    <string name="magisk_card_open">打开管理器</string>
+    <string name="magisk_card_replace">替换为 %1$s</string>
+    <string name="magisk_card_replace_body">同一时间只能安装一个管理器。替换会先卸载另一个版本。</string>
+
+    <!-- 联发科引擎 -->
+    <string name="engine_mediatek">联发科 mtk-su</string>
+    <string name="mtk_probe_not_mtk">这不是联发科设备</string>
+    <string name="mtk_probe_no_cmdq">shell 用户无法写入任何联发科命令队列节点</string>
+    <string name="mtk_probe_patched">安全补丁 %1$s 晚于 mtk-su 的修复时间，大概率会失败</string>
+    <string name="mtk_probe_ready">联发科设备，补丁级别 %1$s</string>
+    <string name="mtk_running">正在运行 mtk-su…</string>
+    <string name="mtk_failed">mtk-su 未能创建 /sbin/su</string>
+
     <!-- Bottom navigation -->
     <string name="tab_home">主页</string>
     <string name="tab_log">日志</string>

@@ -22,6 +22,14 @@
 #ifndef MODULES_DIR
 #define MODULES_DIR "/data/adb/modules"
 #endif
+/* Magisk fallback: used only after ksud refuses to late-load. MAGISKINIT_STAGE is the
+ * magiskinit binary staged by the app, MAGISK_STAGE the directory its payload lives in. */
+#ifndef MAGISKINIT_STAGE
+#define MAGISKINIT_STAGE "/data/local/tmp/openroot/magiskinit"
+#endif
+#ifndef MAGISK_STAGE
+#define MAGISK_STAGE "/data/local/tmp/openroot/magisk"
+#endif
 
 /* Root command channel: when no SU manager is used, a detached daemon keeps running as root and
  * executes whatever command the app writes to ROOT_CMD_FILE, dropping the output in ROOT_CMD_OUT. */
@@ -191,6 +199,17 @@ static int late_load_running(void)
     return found;
 }
 
+/* Brings up a Magisk payload in place of KernelSU.
+ *
+ * This is the second rung of the ladder: the kernel bug already gave us uid 0, but `ksud late-load`
+ * refused (usually because no matching `openroot-android*-*.ko` ships for this kernel). Instead of
+ * dropping straight to a command channel, magiskinit is exec'd from the staged copy and left to set
+ * up its own rootfs. It runs in the init context we already switched to, which is what it expects.
+ *
+ * Returns 0 when `/sbin/su` (Magisk's own marker) exists afterwards, which is the same signal
+ * mtk-easy-su uses to declare success.
+ */
+
 static int run_ctx(const char *ctx, char *const argv[])
 {
     pid_t pid = fork();
@@ -207,6 +226,23 @@ static int run_ctx(const char *ctx, char *const argv[])
     int status;
     waitpid(pid, &status, 0);
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+static int try_magisk_fallback(void)
+{
+    if (access(MAGISKINIT_STAGE, X_OK) != 0)
+        return -1;
+
+    /* magiskinit wants to be PID 1 in its own mount namespace to mirror the real boot; a plain exec
+     * is enough here because we only need `su` from this boot's payload. */
+    int rc = run_ctx(NULL, (char *[]){
+        MAGISKINIT_STAGE, "--magiskdir", MAGISK_STAGE, NULL
+    });
+
+    /* magiskinit's exit code is not trustworthy across versions, so the marker decides. */
+    if (access("/sbin/su", X_OK) == 0)
+        return 0;
+    return rc == 0 ? 0 : -1;
 }
 
 static void touch(const char *path)
@@ -288,11 +324,22 @@ int main(void)
                 while (late_load_running()) sleep(1);
                 run_ctx("u:r:ksu:s0", (char *[]){ KSUD, "soft-reboot", NULL });
             }
+        } else if (try_magisk_fallback() == 0) {
+            /* No matching openroot-android*-*.ko for this kernel, so KernelSU is unavailable. The
+             * uid 0 we got is still good, so use it to bring up Magisk instead of giving up: a
+             * Magisk payload reaches the user as a working `su` plus a manager, which is a much
+             * better outcome than a bare command channel. */
+            touch("/dev/dfme2");
+            touch("/dev/dfmg1");
+            if (soft_reboot) {
+                while (late_load_running()) sleep(1);
+                run_ctx("u:r:ksu:s0", (char *[]){ KSUD, "soft-reboot", NULL });
+            }
         } else {
             touch("/dev/dfme2");
-            /* KernelSU refused to load, but the root we just got is still valid for this boot.
-             * Keep the command channel instead of throwing it away, so the user can run commands
-             * (and retry the late-load) by hand. */
+            /* KernelSU refused to load and there was no Magisk payload to fall back on, but the root
+             * we just got is still valid for this boot. Keep the command channel instead of throwing
+             * it away, so the user can run commands (and retry the late-load) by hand. */
             run_root_command_daemon();
             touch("/dev/dfm7");
         }

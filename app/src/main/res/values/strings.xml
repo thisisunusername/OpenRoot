@@ -74,6 +74,27 @@
     <string name="exploit_root_ready">Temporary root ready, type a command below</string>
     <string name="exploit_profile_gate_failed">This build is not the one the payload was ported to</string>
 
+    <!-- Magisk fallback: no matching kernelSU module for this kernel -->
+    <string name="exploit_magisk_ready">Temporary root acquired, loading Magisk</string>
+    <string name="exploit_magisk_legacy_ready">Temporary root acquired, loading Magisk 20.4 (MediaTek)</string>
+    <string name="magisk_card_title">Magisk manager</string>
+    <string name="magisk_card_body_legacy">This run loaded Magisk 20.4 through the MediaTek payload. Do not update it: a newer manager will ask to upgrade Magisk and that breaks a locked bootloader.</string>
+    <string name="magisk_card_body_modern">This run loaded a modern Magisk payload. Use the current manager.</string>
+    <string name="magisk_card_install">Install %1$s</string>
+    <string name="magisk_card_installed">%1$s is installed</string>
+    <string name="magisk_card_open">Open manager</string>
+    <string name="magisk_card_replace">Replace with %1$s</string>
+    <string name="magisk_card_replace_body">Only one manager can be installed at a time. Replacing uninstalls the other version first.</string>
+
+    <!-- MediaTek engine -->
+    <string name="engine_mediatek">MediaTek mtk-su</string>
+    <string name="mtk_probe_not_mtk">Not a MediaTek device</string>
+    <string name="mtk_probe_no_cmdq">No MediaTek command-queue node is writable by the shell user</string>
+    <string name="mtk_probe_patched">Security patch %1$s is newer than the mtk-su fix; this will probably fail</string>
+    <string name="mtk_probe_ready">MediaTek device, patch level %1$s</string>
+    <string name="mtk_running">Running mtk-su…</string>
+    <string name="mtk_failed">mtk-su did not create /sbin/su</string>
+
     <!-- Bottom navigation -->
     <string name="tab_home">Home</string>
     <string name="tab_log">Log</string>

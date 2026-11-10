@@ -90,6 +90,16 @@ class MainActivity : AppCompatActivity() {
          */
         const val ENGINE_JOKER_OGKI = "cve-2026-64560-joker-ogki"
 
+        /**
+         * MediaTek bootless root.
+         *
+         * Not a CVE id on purpose: `mtk-su` is one binary abusing the MediaTek command-queue driver,
+         * and it is listed beside the kernel engines because it is a way to get root, not because it
+         * shares their mechanism. It is the only engine here that needs no kernel bug and survives no
+         * reboot, and the only one that deploys Magisk instead of KernelSU.
+         */
+        const val ENGINE_MEDIATEK = "mediatek-mtk-su"
+
         /** Kernel family the JokerLock port was built against; shown when it does not match. */
         const val JOKER_FAMILY = "6.6.118-android15-8 oplus GKI"
         /** How long to wait for `_adb-tls-connect._tcp` before giving up on a direct connect. */
@@ -175,6 +185,28 @@ class MainActivity : AppCompatActivity() {
     private val managerPickerVisible = mutableStateOf(false)
     /** Hand-picked manager from [managerPickerVisible]; empty fields mean automatic detection. */
     private val managerOverride = mutableStateOf(KsuManager.Override("", ""))
+
+    /**
+     * Which Magisk manager a run needs, once a Magisk payload is the outcome.
+     *
+     * `null` means no Magisk payload was loaded, so the manager card stays hidden. The two flavors
+     * share a package name, so this is a single choice rather than two independent installs.
+     */
+    private val magiskFlavor = mutableStateOf<MagiskManager.Flavor?>(null)
+
+    /** Whether the manager for [magiskFlavor] is actually installed on the device now. */
+    private val magiskReady = mutableStateOf(false)
+
+    /** Whether the Magisk manager card is shown at all. */
+    private val magiskManagerVisible = mutableStateOf(false)
+
+    /**
+     * Last MediaTek precondition probe, or `null` before the first one.
+     *
+     * Kept as state because the picker row has to describe the device without re-running shell
+     * commands every recomposition.
+     */
+    private val mtkProbe = mutableStateOf<MtkEasySu.Probe?>(null)
 
     /** Active bottom-bar tab: 0 home, 1 vivo/iQOO OTG, 2 exploit log, 3 about. */
     private val selectedTab = mutableStateOf(0)
@@ -848,6 +880,14 @@ class MainActivity : AppCompatActivity() {
                     Log.i(TAG, line)
                 }
                 runOnUiThread { ksudTarget.value = ksud }
+
+                /* The MediaTek probe is three `getprop`s and one open attempt, so it is cheap enough
+                 * to run on every connect. Doing it here rather than when the picker opens means the
+                 * row can describe the device the moment the dialog appears. */
+                val probe = MtkEasySu.probe(AdbConnectionManager.get(this)) { line ->
+                    Log.i(TAG, "mtk probe: $line")
+                }
+                runOnUiThread { mtkProbe.value = probe }
             }
         }, "adb-device-info").start()
     }
@@ -1014,6 +1054,29 @@ class MainActivity : AppCompatActivity() {
                     JokerRunner.isSupported(kernel) &&
                     JokerRunner.isPayloadPresent(this),
             ),
+            /*
+             * The MediaTek row is the only one that is not a kernel exploit. Its `enabled` gate is
+             * the `mtk-su` precondition set: an MTK SoC and a command-queue node the shell user can
+             * open. A build patched after March 2020 stays enabled, because the payload is the only
+             * thing that can really answer that, but the row says so instead of pretending.
+             */
+            ExploitChoice(
+                id = ENGINE_MEDIATEK,
+                title = getString(R.string.engine_mediatek),
+                detail = when {
+                    noConnection -> getString(R.string.engine_connect_first)
+                    mtkProbe.value == null -> getString(R.string.engine_connect_first)
+                    !mtkProbe.value!!.isMediaTek -> getString(R.string.mtk_probe_not_mtk)
+                    mtkProbe.value!!.cmdqPaths.isEmpty() ->
+                        getString(R.string.mtk_probe_no_cmdq)
+                    mtkProbe.value!!.likelyPatched ->
+                        getString(R.string.mtk_probe_patched, mtkProbe.value!!.patchLevel)
+                    else -> getString(
+                        R.string.mtk_probe_ready, mtkProbe.value!!.patchLevel,
+                    )
+                },
+                enabled = info != null && (mtkProbe.value?.supported ?: false),
+            ),
         )
     }
 
@@ -1125,6 +1188,10 @@ class MainActivity : AppCompatActivity() {
                 }?.takeIf { it.packageName.isNotEmpty() }
                 val shark = SharkRunner.Engine.ofId(engineId)
                 when {
+                    /* MediaTek is dispatched before anything else and never reaches the KernelSU
+                     * resolution above: it deploys Magisk, not ksud, so a manager scan would be
+                     * both pointless and misleading in the log. */
+                    engineId == ENGINE_MEDIATEK -> runMediatekEngine(info)
                     engineId == ENGINE_CVE_43499 -> runProfileEngine(info, ksud)
                     engineId == ENGINE_CVE_0041 -> runBinderEngine(info, ksud)
                     engineId == ENGINE_JOKER_OGKI -> runJokerEngine(info, ksud)
@@ -1162,6 +1229,47 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** CVE-2026-43499: the payload picks its profile by `uname -r` and late-loads ksud itself. */
+    /**
+     * Runs the MediaTek payload: mtk-su for root, then Magisk 20.4 into `/sbin`.
+     *
+     * Two things make this different from every other runner here, and both are visible in the
+     * result rather than hidden:
+     *
+     * - the arch half is picked from the device's own ABI, because `mtk-su32` and `mtk-su64` are
+     *   different binaries and the wrong one fails with `exec format error`;
+     * - there is no KernelSU manager to open afterwards. Success means `/sbin/su` exists, and the
+     *   manager to install is the legacy one, which [reportHandoff] handles through the payload tag.
+     */
+    private fun runMediatekEngine(info: DeviceInfo): String {
+        val manager = AdbConnectionManager.get(this)
+        // The half is decided by the probe, which reads the device's own ABI list: `mtk-su32` and
+        // `mtk-su64` are different binaries and the wrong one dies with `exec format error`.
+        val use64 = mtkProbe.value?.use64 ?: true
+        logLine("<i> MediaTek payload, ${if (use64) "64" else "32"}-bit half")
+        reportProgress(0.15f)
+
+        val ok = MtkEasySu.run(
+            context = this,
+            manager = manager,
+            use64 = use64,
+            log = ::logLine,
+            timeoutMs = 180_000L,
+        )
+        reportProgress(1f)
+        if (!ok) {
+            logLine("<e> ${getString(R.string.mtk_failed)}")
+            return getString(R.string.mtk_failed)
+        }
+        /* Success is a live Magisk, so the run is reported through the same handoff the kernel
+         * engines use. The marker is read back rather than assumed: `magisk-boot.sh` exits 0 in
+         * some failure modes, so `/dev/dfmm1` is what the app actually believes. */
+        return reportHandoff(
+            ksud = null,
+            handoff = RootHandoff.probe(manager, ::logLine, waitMs = 8_000),
+            exitCode = 0,
+        )
+    }
+
     private fun runProfileEngine(info: DeviceInfo, ksud: KsuManager.Target?): String {
         val result = RootExploit.run(
             context = this,
@@ -1375,6 +1483,12 @@ class MainActivity : AppCompatActivity() {
                 )
                 getString(if (opened) R.string.exploit_ksu_opened else R.string.exploit_ksu_manual)
             }
+            /* No matching ko for this kernel, so the payload fell back to Magisk. The pairing is not
+             * free: the MediaTek path leaves Magisk 20.4 in /sbin, which only the legacy manager
+             * understands, and a modern manager would offer an "update" that bricks a locked device. */
+            RootHandoff.State.MAGISK, RootHandoff.State.MAGISK_LEGACY -> {
+                openMagiskManager(MagiskManager.flavorFor(handoff.payload))
+            }
             RootHandoff.State.COMMAND -> {
                 runOnUiThread { commandMode.value = true }
                 getString(R.string.exploit_root_ready)
@@ -1386,6 +1500,42 @@ class MainActivity : AppCompatActivity() {
                     getString(R.string.exploit_exit_code, exitCode)
                 }
         }
+    }
+
+    /**
+     * Points the user at the manager that matches the payload just loaded.
+     *
+     * Installing is attempted through the shell user, which only holds `INSTALL_PACKAGES` on a
+     * debuggable build, so a failure is normal and is reported as "the APK is staged, tap it".
+     * Nothing is forced: replacing one flavor with the other uninstalls the first, so that only ever
+     * happens after [MagiskManager.install] decided it has to.
+     */
+    private fun openMagiskManager(flavor: MagiskManager.Flavor): String {
+        val manager = AdbConnectionManager.get(this)
+        var installedVersion = ""
+        Thread({
+            runCatching {
+                val result = MagiskManager.install(manager, flavor, ::logLine)
+                if (result.ok) {
+                    installedVersion = result.message
+                    MagiskManager.launch(manager, ::logLine)
+                } else {
+                    logLine("<w> ${result.message}")
+                }
+            }.onFailure { error -> logLine("<e> ${error.message}") }
+            runOnUiThread {
+                magiskFlavor.value = flavor
+                magiskReady.value = installedVersion.isNotEmpty()
+                magiskManagerVisible.value = true
+            }
+        }, "magisk-manager").start()
+        return getString(
+            if (flavor == MagiskManager.Flavor.LEGACY) {
+                R.string.exploit_magisk_legacy_ready
+            } else {
+                R.string.exploit_magisk_ready
+            }
+        )
     }
 
     /** Runs one command through the root channel and mirrors its output while it runs. */

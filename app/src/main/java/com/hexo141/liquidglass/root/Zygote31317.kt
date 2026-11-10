@@ -23,9 +23,12 @@ import com.hexo141.liquidglass.adb.AdbShell
  *
  * ## Window
  *
- * Only Android 12 through 13 (`S`..`TIRAMISU`) are exploitable through this path, and only on builds
- * whose security patch predates June 2024. Outside that window there is nothing to try, so [probe]
- * answers honestly and the gated engines stay disabled rather than failing after a push.
+ * Android 9 through 13 (`P`..`TIRAMISU`). Below 9 the zygote command line is not assembled from this
+ * setting; from 14 it is no longer consulted. The patch check is not a single property either:
+ * AOSP's `ro.build.version.security_patch` is only one of eighteen places a build may publish its
+ * level, and a vendor or OEM partition can be patched while the system one lags. [probe] reads all of
+ * them and treats any value at or after June 2024 as fixed, because the alternative is writing a
+ * dangerous key and learning afterwards that it could not have worked.
  *
  * ## The part that has to be right
  *
@@ -44,14 +47,50 @@ object Zygote31317 {
     /** Written by the injected payload so success can be observed without guessing. */
     private const val MARKER = "/data/local/tmp/openroot/31317-ok"
 
+    /**
+     * Every property an OEM or AOSP build may publish the security patch level under.
+     *
+     * One property is not enough. AOSP sets `ro.build.version.security_patch`, but a vendor build
+     * can carry a *different* value in `ro.vendor.*` (the vendor partition's own patch level) and a
+     * Huawei build adds its own `ro.huawei.*` on top. Checking only the AOSP one reads a number that
+     * the device's vendor image did not necessarily honour, which is exactly the wrong answer to
+     * give before writing a zygote payload.
+     *
+     * `ro.*` properties are read-only at runtime, and a missing one prints an empty line from
+     * `getprop`, so reading all of them is safe and costs one shell round trip.
+     */
+    private val PATCH_PROPS = listOf(
+        "ro.build.version.security_patch",
+        "ro.vendor.build.security_patch",
+        "ro.system.build.version.security_patch",
+        "ro.product.build.version.security_patch",
+        "ro.system_ext.build.version.security_patch",
+        "ro.odm.build.version.security_patch",
+        "ro.bootimage.build.version.security_patch",
+        "ro.vendor_dlkm.build.version.security_patch",
+        "ro.huawei.build.version.security_patch",
+        "ro.build.version.security_patch.huawei",
+        "ro.miui.build.version.security_patch",
+        "ro.oplus.build.version.security_patch",
+        "ro.oppo.build.version.security_patch",
+        "ro.vivo.build.version.security_patch",
+        "ro.samsung.build.version.security_patch",
+        "ro.oneplus.build.version.security_patch",
+        "ro.realme.build.version.security_patch",
+        "ro.honor.build.version.security_patch",
+    )
+
+    /** The June 2024 bulletin is where this bug was fixed; anything at or after it is patched. */
+    private const val FIXED_AT = "2024-06-01"
+
     enum class Availability {
-        /** The device is in the exploitable window. */
+        /** The device is in the exploitable window and no patch property says it is fixed. */
         READY,
 
-        /** Connected, but Android too old or too new for this bug. */
+        /** Connected, but Android outside 9-13, where the argument parser is not this one. */
         OUT_OF_WINDOW,
 
-        /** Patch level is new enough that the bug is fixed. */
+        /** At least one patch property is new enough that the bug is fixed. */
         PATCHED,
 
         /** No connection, so nothing could be read. */
@@ -62,45 +101,82 @@ object Zygote31317 {
         val availability: Availability,
         val sdk: Int,
         val release: String,
-        val patchLevel: String,
+        /** Every `(property, value)` pair that answered, in [PATCH_PROPS] order. */
+        val patchLevels: List<Pair<String, String>>,
         val detail: String,
     ) {
         val canInject: Boolean get() = availability == Availability.READY
+
+        /** The newest patch level any property reported, for one-line display. */
+        val newestPatch: String
+            get() = patchLevels.maxOfOrNull { it.second }.orEmpty()
     }
 
     /**
-     * Reads whether this device is in the window.
+     * Reads whether this device is in the window, across **every** patch property it publishes.
      *
-     * Both bounds matter: below Android 12 the argument parser is different, and from Android 14 the
-     * setting is no longer consulted, so a run there would write a dangerous key and gain nothing.
+     * The window is Android 9 through 13. Below 9 the zygote command line is not built from this
+     * setting at all; from 14 the setting is no longer consulted. Only inside that range does a write
+     * reach the parser this bug is about.
+     *
+     * The patch check is the conservative one: if *any* property reports [FIXED_AT] or later, the
+     * device counts as patched. That is deliberate. A vendor partition that was patched while the
+     * system partition lags still refuses the payload, and the failure would land after the
+     * dangerous write had already gone in — the one outcome this file exists to avoid.
      */
     fun probe(manager: AbsAdbConnectionManager, log: (String) -> Unit = {}): Probe {
-        val command = "getprop ro.build.version.sdk; getprop ro.build.version.release; " +
-            "getprop ro.build.version.security_patch"
-        log("$ $command")
-        val out = runCatching { AdbShell.exec(manager, command) }.getOrDefault("")
+        // One round trip: version, then a labelled line per property so ordering cannot be lost.
+        val script = buildString {
+            append("getprop ro.build.version.sdk; ")
+            append("getprop ro.build.version.release; ")
+            for (p in PATCH_PROPS) append("echo \"$p=\$(getprop $p)\"; ")
+        }
+        log("$ getprop sdk, release, and ${PATCH_PROPS.size} patch properties")
+        val out = runCatching { AdbShell.exec(manager, script) }.getOrDefault("")
         if (out.isNotBlank()) log(out.trimEnd())
 
         val lines = out.lineSequence().map { it.trim() }.toList()
         val sdk = lines.getOrNull(0)?.toIntOrNull() ?: 0
         val release = lines.getOrNull(1).orEmpty()
-        val patch = lines.getOrNull(2).orEmpty()
+
+        // Keep the order of PATCH_PROPS rather than the order getprop happened to answer in.
+        val reported = mutableMapOf<String, String>()
+        for (line in lines) {
+            val eq = line.indexOf('=')
+            if (eq <= 0) continue
+            val name = line.substring(0, eq).trim()
+            val value = line.substring(eq + 1).trim()
+            if (name in PATCH_PROPS && value.isNotEmpty()) reported[name] = value
+        }
+        val levels = PATCH_PROPS.mapNotNull { p -> reported[p]?.let { p to it } }
+
+        // Any property at or after the fix means patched; the newest one is what gets reported.
+        val patched = levels.firstOrNull { (_, v) -> v >= FIXED_AT }
 
         val availability = when {
             sdk == 0 -> Availability.UNKNOWN
-            sdk < 31 || sdk > 33 -> Availability.OUT_OF_WINDOW
-            patch >= "2024-06-01" -> Availability.PATCHED
+            sdk < 28 || sdk > 33 -> Availability.OUT_OF_WINDOW
+            patched != null -> Availability.PATCHED
             else -> Availability.READY
         }
         val detail = when (availability) {
-            Availability.READY -> "Android $release (API $sdk), patch $patch: in the window"
+            Availability.READY ->
+                if (levels.isEmpty()) {
+                    "Android $release (API $sdk): no patch property answered, so patching is unknown"
+                } else {
+                    "Android $release (API $sdk), newest patch " +
+                        "${levels.maxOf { it.second }}: in the window"
+                }
             Availability.OUT_OF_WINDOW ->
-                "Android $release (API $sdk) is outside the Android 12-13 window this bug covers"
-            Availability.PATCHED -> "patch level $patch includes the June 2024 fix"
+                "Android $release (API $sdk) is outside the Android 9-13 window this bug covers"
+            Availability.PATCHED -> "${patched!!.first} reports ${patched.second}, " +
+                "which includes the June 2024 fix"
             Availability.UNKNOWN -> "the build properties could not be read"
         }
         log("<i> $detail")
-        return Probe(availability, sdk, release, patch, detail)
+        // A device that answered with no patch property at all is still offered: `levels` being empty
+        // is not evidence of being patched, and refusing would hide an otherwise valid window.
+        return Probe(availability, sdk, release, levels, detail)
     }
 
     /**

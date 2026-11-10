@@ -85,10 +85,10 @@ Shizuku is installed and authorised, OpenRoot never needs a pairing code at all.
     with them. What comes out is code running as `system` (`u:r:system_app:s0`) — **System privileges
     only, never root** — and the row never reports "rooted" because it never is.
 
-    Two things make it safe to ship: it only works on Android 12-13 whose security patch predates
+    Two things make it safe to ship: it only works on Android 9-13 whose security patch predates
     June 2024, so the row disables itself outside that window instead of failing after a write; and
     the dangerous key is restored in a `finally` block, unconditionally, because a malformed value
-    left in that key is how a device stops booting. The upstream reference clears it 200 ms later and
+    left in that key is how a device stops booting. The patch check reads **eighteen** properties, not one: AOSP publishes `ro.build.version.security_patch`, but a vendor partition can carry a different level in `ro.vendor.*`, `ro.system.*` or `ro.product.*`, and OEM builds add their own (`ro.huawei.*`, `ro.miui.*`, `ro.oplus.*`, `ro.vivo.*` and so on). Any one of them at or after June 2024 counts as patched, and the row names the property that decided it. The upstream reference clears it 200 ms later and
     hopes; this waits for the payload's own marker and restores either way. Gated engines read that
     marker, not the mere absence of an exception.
 

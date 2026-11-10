@@ -95,6 +95,8 @@
     <string name="mtk_probe_ready">联发科设备，补丁级别 %1$s</string>
     <string name="engine_zygote_31317">CVE-2024-31317（前置）</string>
     <string name="zygote_31317_ready">Android 12-13 且未打补丁：可注入到 system_app。仅 System 权限，不是 root</string>
+    <string name="zygote_31317_patchlist">已读取的补丁属性：%1$s</string>
+    <string name="zygote_31317_nopatch">没有任何补丁属性有值；这台设备没有发布已知的任何属性名</string>
     <string name="zygote_31317_injecting">正在伪造 zygote 参数并启动应用来触发 fork</string>
     <string name="zygote_31317_restored">设置项已还原，没有留下任何残留</string>
     <string name="zygote_31317_ran">代码已以 system（system_app）身份运行。仅 System 权限，不是 root</string>

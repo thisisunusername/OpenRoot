@@ -46,7 +46,7 @@ OpenRoot 是一个 Android 应用，它通过**两种通道之一**连接设备�
     由于这个引擎部署的是 Magisk 而不是 KernelSU，它配的是下文所述的老版管理器。它的载荷逐字节取自 `JunioJsv/mtk-easy-su`（`mtk-su32/64`、`magiskinit32/64`、`magisk-boot.sh`），见 `THIRD_PARTY_NOTICES.md`。
   - **CVE-2024-31317（zygote 参数注入）——前置，不是 root。** 这一行出现在选择器里，是因为它是唯一一个会改变「后续引擎能做什么」的引擎，标题里就写明了这一点。它把伪造的 zygote 参数（`--setuid=`、`--seinfo=`、`--invoke-with`）写进 `Settings.Global.hidden_api_blacklist_exemptions`，再启动一个应用，让 zygote 带着这些参数 fork。产出是以 `system`（`u:r:system_app:s0`）身份运行的代码——**仅 System 权限，永远不是 root**——这一行从不上报「已 root」，因为它从来就不是。
 
-    有两件事让它敢被内置：它只在**安全补丁早于 2024 年 6 月**的 Android 12-13 上有效，窗口之外这一行会直接置灰，而不是写完才失败；那个危险的设置项会在 `finally` 里**无条件还原**，因为一旦把畸形值留在那个键里，设备就起不来了。上游参考实现是 200 ms 后重置然后听天由命；这里会等载荷自己写下的标记，无论成败都还原。被门禁的引擎读的是那个标记，而不是「没抛异常」。
+    有两件事让它敢被内置：它只在**安全补丁早于 2024 年 6 月**的 Android 9-13 上有效，窗口之外这一行会直接置灰，而不是写完才失败；那个危险的设置项会在 `finally` 里**无条件还原**，因为一旦把畸形值留在那个键里，设备就起不来了。 补丁检测会读**十八个**属性，而不是一个：AOSP 发布的是 `ro.build.version.security_patch`，但 vendor 分区可能在 `ro.vendor.*`、`ro.system.*`、`ro.product.*` 里带另一个级别，厂商构建还会再加自己的（`ro.huawei.*`、`ro.miui.*`、`ro.oplus.*`、`ro.vivo.*` 等）。只要其中任何一个 ≥ 2024 年 6 月，就判定为已修补，并在这一行里写明是哪个属性决定的。上游参考实现是 200 ms 后重置然后听天由命；这里会等载荷自己写下的标记，无论成败都还原。被门禁的引擎读的是那个标记，而不是「没抛异常」。
 
     上游：<https://github.com/wqry085/PoC-Deployer-System>
   - **CVE-2026-49881 + CVE-2026-43284（LSPromise）**：合成一行，因为拆开后两半都做不成事。49881 是 Android 17 的 Telecom 逻辑漏洞，不需要任何额外权限就能在 `system_server` 里跑 Java；43284 就是上面那个 page cache 写入，但 SELinux 只把 `netlink_xfrm_socket` 授予 `system_server`、`network_stack` 和 `netd` 三个域。所以顺序只能是：49881 进 `system_server`，注入到 `com.android.networkstack`，DirtyFrag 的写入从那里发起。上面那一行**独立的 CVE-2026-43284 保持原样**——它是给「用别的方式够到 xfrm 的内核」准备的 page cache 引擎，不是这个引擎的旧版本。

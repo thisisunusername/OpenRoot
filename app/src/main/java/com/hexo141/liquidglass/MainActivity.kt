@@ -1149,7 +1149,19 @@ class MainActivity : AppCompatActivity() {
                     noConnection -> getString(R.string.engine_connect_first)
                     zygoteProbe.value == null -> getString(R.string.engine_connect_first)
                     zygoteReady.value -> getString(R.string.zygote_31317_ran)
-                    zygoteProbe.value!!.canInject -> getString(R.string.zygote_31317_ready)
+                    zygoteProbe.value!!.canInject ->
+                        // Name the properties that answered, so a "patched" verdict on a device the
+                        // user believes is unpatched can be traced to the vendor property that did it.
+                        zygoteProbe.value!!.patchLevels.joinToString(", ") { "${it.first}=${it.second}" }
+                            .let { list ->
+                                if (list.isEmpty()) {
+                                    getString(R.string.zygote_31317_ready) + " " +
+                                        getString(R.string.zygote_31317_nopatch)
+                                } else {
+                                    getString(R.string.zygote_31317_ready) + " " +
+                                        getString(R.string.zygote_31317_patchlist, list)
+                                }
+                            }
                     else -> zygoteProbe.value!!.detail
                 },
                 enabled = info != null && zygoteProbe.value?.canInject == true,

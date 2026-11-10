@@ -94,6 +94,8 @@
     <string name="mtk_probe_ready">MediaTek device, patch level %1$s</string>
     <string name="engine_zygote_31317">CVE-2024-31317 (prerequisite)</string>
     <string name="zygote_31317_ready">Android 12-13, unpatched: injects into system_app. System privileges only, not root</string>
+    <string name="zygote_31317_patchlist">Patch properties read: %1$s</string>
+    <string name="zygote_31317_nopatch">No patch property answered; this device publishes none of the known names</string>
     <string name="zygote_31317_injecting">Forging zygote arguments and launching to trigger a fork</string>
     <string name="zygote_31317_restored">The settings key was restored; nothing was left behind</string>
     <string name="zygote_31317_ran">Code now runs as system (system_app). System privileges only, not root</string>

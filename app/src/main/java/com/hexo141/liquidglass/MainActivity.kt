@@ -37,6 +37,7 @@ import com.hexo141.liquidglass.root.DirtyFragRunner
 import com.hexo141.liquidglass.root.ExploitMemory
 import com.hexo141.liquidglass.root.BinderBombRunner
 import com.hexo141.liquidglass.root.GhostLockRunner
+import com.hexo141.liquidglass.root.GhostLock54Runner
 import com.hexo141.liquidglass.root.GpuRunner
 import com.hexo141.liquidglass.root.JokerRunner
 import com.hexo141.liquidglass.root.KsuManager
@@ -122,6 +123,15 @@ class MainActivity : AppCompatActivity() {
          * kernels reached another way, not an earlier version of this one.
          */
         const val ENGINE_LSPROMISE = "lspromise-49881-43284"
+
+        /**
+         * GhostLock54: CVE-2026-43499, ported to the OPPO Reno7 5G.
+         *
+         * A separate row from [ENGINE_CVE_43499] because the offsets are compiled into the C
+         * for one kernel release instead of picked from a profile, and its follow-up is a
+         * bundled KernelSU module rather than the shared ksud.
+         */
+        const val ENGINE_GHOSTLOCK54 = "ghostlock54-reno7"
 
         /** Kernel family the JokerLock port was built against; shown when it does not match. */
         const val JOKER_FAMILY = "6.6.118-android15-8 oplus GKI"
@@ -249,6 +259,9 @@ class MainActivity : AppCompatActivity() {
 
     /** Last LSPromise prerequisite probe, or `null` before the first one. */
     private val lspromiseProbe = mutableStateOf<LSPromise.Probe?>(null)
+
+    /** Last GhostLock54 kernel probe, or `null` before the first one. */
+    private val ghost54Probe = mutableStateOf<GhostLock54Runner.Probe?>(null)
 
     /** Active bottom-bar tab: 0 home, 1 vivo/iQOO OTG, 2 exploit log, 3 about. */
     private val selectedTab = mutableStateOf(0)
@@ -928,26 +941,43 @@ class MainActivity : AppCompatActivity() {
                 }
                 runOnUiThread { ksudTarget.value = ksud }
 
-                /* The MediaTek probe is three `getprop`s and one open attempt, so it is cheap enough
-                 * to run on every connect. Doing it here rather than when the picker opens means the
-                 * row can describe the device the moment the dialog appears. */
-                val probe = MtkEasySu.probe(AdbConnectionManager.get(this)) { line ->
-                    Log.i(TAG, "mtk probe: $line")
-                }
+                /* Each probe is guarded on its own. They all run on this one worker thread, so an
+                 * exception thrown by the first would otherwise end the thread and leave every later
+                 * probe at its `null` default — which the picker reports as "connect ADB first" on a
+                 * device that is plainly connected. */
+                val probe = runCatching {
+                    MtkEasySu.probe(AdbConnectionManager.get(this)) { line ->
+                        Log.i(TAG, "mtk probe: $line")
+                    }
+                }.onFailure { Log.w(TAG, "mtk probe failed", it) }.getOrNull()
                 runOnUiThread { mtkProbe.value = probe }
 
                 /* Both new probes are property reads plus one file check, so they ride along with the
                  * connect instead of waiting for the picker: the 31317 row's disabled text and the
                  * LSPromise row's vermagic note both need to be right the instant it opens. */
-                val zygote = Zygote31317.probe(AdbConnectionManager.get(this)) { line ->
-                    Log.i(TAG, "31317 probe: $line")
-                }
+                val zygote = runCatching {
+                    Zygote31317.probe(AdbConnectionManager.get(this)) { line ->
+                        Log.i(TAG, "31317 probe: $line")
+                    }
+                }.onFailure { Log.w(TAG, "31317 probe failed", it) }.getOrNull()
                 runOnUiThread { zygoteProbe.value = zygote }
 
-                val lspromise = LSPromise.probe(AdbConnectionManager.get(this)) { line ->
-                    Log.i(TAG, "lspromise probe: $line")
-                }
+                val lspromise = runCatching {
+                    LSPromise.probe(AdbConnectionManager.get(this)) { line ->
+                        Log.i(TAG, "lspromise probe: $line")
+                    }
+                }.onFailure { Log.w(TAG, "lspromise probe failed", it) }.getOrNull()
                 runOnUiThread { lspromiseProbe.value = lspromise }
+
+                /* GhostLock54 needs one `uname -r`, so it rides along too. Its verdict is a strict
+                 * string equality against the single release its offsets were written for: a prefix
+                 * match would accept a neighbouring build and then write the wrong offsets into it. */
+                val ghost54 = runCatching {
+                    GhostLock54Runner.probe(this, AdbConnectionManager.get(this)) { line ->
+                        Log.i(TAG, "ghostlock54 probe: $line")
+                    }
+                }.onFailure { Log.w(TAG, "ghostlock54 probe failed", it) }.getOrNull()
+                runOnUiThread { ghost54Probe.value = ghost54 }
             }
         }, "adb-device-info").start()
     }
@@ -976,10 +1006,52 @@ class MainActivity : AppCompatActivity() {
             toast(R.string.exploit_needs_adb)
             return
         }
+        /* A probe can come back null when the worker that runs it failed, and the row would then
+         * say "still probing" forever. Retrying here means the row describes the device this time,
+         * instead of needing a reconnect to clear a transient error. */
+        val stale = mtkProbe.value == null || zygoteProbe.value == null || lspromiseProbe.value == null
+        if (stale) refreshProbes(onDone = ::rebuildChoices)
         // All four CVEs are always listed; each row explains whether it can run.
         exploitChoices.value = buildChoices(deviceInfo.value)
         pickerVisible.value = true
     }
+
+    /**
+     * Re-runs any probe that has no answer yet.
+     *
+     * Each one is independent and guarded on its own: one failure must not stop the next, which is
+     * exactly what used to happen when they shared [loadDeviceInfo]'s worker thread unguarded.
+     */
+    private fun refreshProbes(onDone: () -> Unit = {}) {
+        Thread({
+            val manager = AdbConnectionManager.get(this)
+            if (mtkProbe.value == null) {
+                val p = runCatching { MtkEasySu.probe(manager) { Log.i(TAG, "mtk probe: $it") } }
+                    .onFailure { Log.w(TAG, "mtk probe retry failed", it) }.getOrNull()
+                if (p != null) runOnUiThread { mtkProbe.value = p }
+            }
+            if (zygoteProbe.value == null) {
+                val p = runCatching {
+                    Zygote31317.probe(manager) { Log.i(TAG, "31317 probe: $it") }
+                }.onFailure { Log.w(TAG, "31317 probe retry failed", it) }.getOrNull()
+                if (p != null) runOnUiThread { zygoteProbe.value = p }
+            }
+            if (lspromiseProbe.value == null) {
+                val p = runCatching {
+                    LSPromise.probe(manager) { Log.i(TAG, "lspromise probe: $it") }
+                }.onFailure { Log.w(TAG, "lspromise probe retry failed", it) }.getOrNull()
+                if (p != null) runOnUiThread { lspromiseProbe.value = p }
+            }
+            runOnUiThread { onDone() }
+        }, "probe-retry").start()
+    }
+
+    /** Rebuilds the open picker after a late probe answer, so its rows stop saying "still probing". */
+    private fun rebuildChoices() {
+        if (!pickerVisible.value) return
+        exploitChoices.value = buildChoices(deviceInfo.value)
+    }
+
     /**
      * Manager row tapped: seed the dialog from what is stored, then resolve in the background so the
      * "Detected:" line shows the live answer rather than a stale one.
@@ -1125,7 +1197,7 @@ class MainActivity : AppCompatActivity() {
                 title = getString(R.string.engine_mediatek),
                 detail = when {
                     noConnection -> getString(R.string.engine_connect_first)
-                    mtkProbe.value == null -> getString(R.string.engine_connect_first)
+                    mtkProbe.value == null -> getString(R.string.probe_pending)
                     !mtkProbe.value!!.isMediaTek -> getString(R.string.mtk_probe_not_mtk)
                     mtkProbe.value!!.cmdqPaths.isEmpty() ->
                         getString(R.string.mtk_probe_no_cmdq)
@@ -1147,7 +1219,7 @@ class MainActivity : AppCompatActivity() {
                 title = getString(R.string.engine_zygote_31317),
                 detail = when {
                     noConnection -> getString(R.string.engine_connect_first)
-                    zygoteProbe.value == null -> getString(R.string.engine_connect_first)
+                    zygoteProbe.value == null -> getString(R.string.probe_pending)
                     zygoteReady.value -> getString(R.string.zygote_31317_ran)
                     zygoteProbe.value!!.canInject ->
                         // Name the properties that answered, so a "patched" verdict on a device the
@@ -1174,8 +1246,8 @@ class MainActivity : AppCompatActivity() {
                 id = ENGINE_LSPROMISE,
                 title = getString(R.string.engine_lspromise),
                 detail = when {
-                    noConnection -> getString(R.string.engine_connect_first)
-                    lspromiseProbe.value == null -> getString(R.string.engine_connect_first)
+                    noConnection -> getString(R.string.engine_lspromise_needs_adb)
+                    lspromiseProbe.value == null -> getString(R.string.probe_pending)
                     !LSPromise.isPayloadPresent(this) ->
                         getString(R.string.engine_payload_not_packaged)
                     else -> lspromiseProbe.value!!.detail
@@ -1183,6 +1255,21 @@ class MainActivity : AppCompatActivity() {
                 enabled = info != null &&
                     lspromiseProbe.value?.canRun == true &&
                     LSPromise.isPayloadPresent(this),
+            ),
+            /*
+             * GhostLock54 is the second row for CVE-2026-43499, and the title says which port it is
+             * so the two 43499 rows are never confused. Its gate is a single kernel string, because
+             * `ghostlock54.c` carries that kernel's offsets in its source and checks nothing itself.
+             */
+            ExploitChoice(
+                id = ENGINE_GHOSTLOCK54,
+                title = getString(R.string.engine_ghostlock54),
+                detail = when {
+                    noConnection -> getString(R.string.engine_connect_first)
+                    ghost54Probe.value == null -> getString(R.string.probe_pending)
+                    else -> ghost54Probe.value!!.detail
+                },
+                enabled = info != null && ghost54Probe.value?.canRun == true,
             ),
         )
     }
@@ -1253,6 +1340,7 @@ class MainActivity : AppCompatActivity() {
             ENGINE_ZYGOTE_31317 -> if (zygoteProbe.value?.canInject != true) return
             ENGINE_LSPROMISE ->
                 if (lspromiseProbe.value?.canRun != true || !LSPromise.isPayloadPresent(this)) return
+            ENGINE_GHOSTLOCK54 -> if (ghost54Probe.value?.canRun != true) return
             else -> {
                 // The three Shark ports share nothing but the driver shape: each one names its own
                 // kernel family, and the runner refuses a mismatch before anything is pushed.
@@ -1306,6 +1394,7 @@ class MainActivity : AppCompatActivity() {
                     engineId == ENGINE_MEDIATEK -> runMediatekEngine()
                     engineId == ENGINE_ZYGOTE_31317 -> runZygoteEngine()
                     engineId == ENGINE_LSPROMISE -> runLSPromiseEngine()
+                    engineId == ENGINE_GHOSTLOCK54 -> runGhostLock54Engine()
                     engineId == ENGINE_CVE_43499 -> runProfileEngine(info, ksud)
                     engineId == ENGINE_CVE_0041 -> runBinderEngine(info, ksud)
                     engineId == ENGINE_JOKER_OGKI -> runJokerEngine(info, ksud)
@@ -1451,6 +1540,41 @@ class MainActivity : AppCompatActivity() {
         return when {
             result.syscallReachable -> getString(R.string.lspromise_reached)
             result.daemonUp -> getString(R.string.lspromise_stopped, result.detail)
+            else -> result.detail
+        }
+    }
+
+    /**
+     * GhostLock54: the OPPO Reno7 5G port of CVE-2026-43499.
+     *
+     * Success here is a loaded `kernelsu.ko`, not a `su` that works right now: the exploit replaces
+     * the target's cred with `init_cred` and the module then runs the manager's own lifecycle, so
+     * the user opens KernelSU Manager afterwards and grants root from there. Saying "rooted" here
+     * would be true for about as long as the process lives, which is not what the row promises.
+     */
+    private fun runGhostLock54Engine(): String {
+        val manager = AdbConnectionManager.get(this)
+        reportProgress(0.1f)
+        logLine("<i> ${getString(R.string.ghostlock54_staging)}")
+        val result = GhostLock54Runner.run(
+            context = this,
+            manager = manager,
+            log = ::logLine,
+        )
+        reportProgress(1f)
+        return when {
+            result.moduleLoaded -> {
+                // The module is up; the manager is what turns that into usable root for the user.
+                val opened = KsuManager.launchWithRetry(
+                    context = this,
+                    manager = manager,
+                    packageName = GhostLock54Runner.KSUN_PACKAGE,
+                    log = ::logLine,
+                )
+                getString(
+                    if (opened) R.string.exploit_ksu_opened else R.string.exploit_ksu_manual,
+                )
+            }
             else -> result.detail
         }
     }

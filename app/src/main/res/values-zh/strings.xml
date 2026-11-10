@@ -101,7 +101,10 @@
     <string name="zygote_31317_restored">设置项已还原，没有留下任何残留</string>
     <string name="zygote_31317_ran">代码已以 system（system_app）身份运行。仅 System 权限，不是 root</string>
     <string name="zygote_31317_failed">注入的载荷始终没有回传结果</string>
+    <string name="engine_lspromise_needs_adb">请先连接 adb，LSPromise 只能用 adb 提权</string>
     <string name="engine_lspromise">CVE-2026-49881 + CVE-2026-43284（LSPromise）</string>
+    <string name="engine_ghostlock54">CVE-2026-43499（GhostLock54，OPPO Reno7 5G）</string>
+    <string name="ghostlock54_staging">正在把 ghostlock54 和 kernelsu.ko 暂存到 /data/local/tmp…</string>
     <string name="lspromise_not_staged">无法把 LSPromise 的载荷推送到设备</string>
     <string name="lspromise_stopped">在内核写入之前停止：%1$s</string>
     <string name="lspromise_reached">xfrm 套接字可达，这条链可以继续</string>
@@ -180,6 +183,7 @@
     <string name="engine_picker_run">运行</string>
     <string name="engine_picker_unavailable">不可用</string>
     <string name="engine_picker_cancel">取消</string>
+    <string name="probe_pending">还在探测设备，请稍等再打开这个列表</string>
     <string name="engine_connect_first">请先连接 adb</string>
     <string name="engine_profile_ready">%1$s，配置就绪</string>
     <string name="engine_kernel_profile_for">%1$s 的内核配置</string>

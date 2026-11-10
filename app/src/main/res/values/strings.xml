@@ -100,7 +100,10 @@
     <string name="zygote_31317_restored">The settings key was restored; nothing was left behind</string>
     <string name="zygote_31317_ran">Code now runs as system (system_app). System privileges only, not root</string>
     <string name="zygote_31317_failed">The injected payload never reported back</string>
+    <string name="engine_lspromise_needs_adb">Connect ADB first: LSPromise can only escalate over ADB</string>
     <string name="engine_lspromise">CVE-2026-49881 + CVE-2026-43284 (LSPromise)</string>
+    <string name="engine_ghostlock54">CVE-2026-43499 (GhostLock54, OPPO Reno7 5G)</string>
+    <string name="ghostlock54_staging">Staging ghostlock54 and kernelsu.ko into /data/local/tmp…</string>
     <string name="lspromise_not_staged">The LSPromise payloads could not be staged on the device</string>
     <string name="lspromise_stopped">Stopped before the kernel write: %1$s</string>
     <string name="lspromise_reached">The xfrm socket was reachable; the chain can proceed</string>
@@ -179,6 +182,7 @@
     <string name="engine_picker_run">Run</string>
     <string name="engine_picker_unavailable">Unavailable</string>
     <string name="engine_picker_cancel">Cancel</string>
+    <string name="probe_pending">Still probing the device; open this list again in a moment</string>
     <string name="engine_connect_first">Connect to adb first</string>
     <string name="engine_profile_ready">%1$s, profile ready</string>
     <string name="engine_kernel_profile_for">Kernel profile for %1$s</string>

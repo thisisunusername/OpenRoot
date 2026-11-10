@@ -229,6 +229,25 @@ val buildNativeBinder54 = tasks.register<Exec>("buildNativeBinder54") {
 }
 
 /**
+ * GhostLock54: the OPPO Reno7 5G port of CVE-2026-43499.
+ *
+ * A separate task and a separate directory because it is not a profile of [buildNativeExploit]:
+ * that task compiles the upstream engine for whichever `uname -r` the bundled profiles know, while
+ * this one is a single hand-ported build for `5.4.254-qgki-gaa96eae94d32` whose offsets are baked
+ * into the C. It also links libselinux, which the profile engine does not.
+ */
+val buildNativeGhost54 = tasks.register<Exec>("buildNativeGhost54") {
+    group = "build"
+    description = "Compiles the arm64 GhostLock54 payload for the OPPO Reno7 5G"
+    enabled = buildNative
+    workingDir = rootProject.layout.projectDirectory.dir("native-ghost54").asFile
+    commandLine(ndkMake, "all", "-j4")
+    environment("NDK_ROOT", ndkDir)
+    inputs.dir(rootProject.layout.projectDirectory.dir("native-ghost54"))
+    outputs.dir(layout.buildDirectory.dir("ghost54"))
+}
+
+/**
  * The only task that writes into jniLibs. When the payloads are prebuilt this does nothing, so
  * the committed .so files are packaged exactly as they were released.
  */
@@ -238,6 +257,7 @@ val prepareNativePayloads = tasks.register<Copy>("prepareNativePayloads") {
     enabled = buildNative
     dependsOn(buildNativeExploit, buildNativePageCache, buildNativeGpu, buildNativePct)
     dependsOn(buildNativeBinder54)
+    dependsOn(buildNativeGhost54)
     from(layout.buildDirectory.file("native/ghostlock")) {
         rename { "libghostlock.so" }
     }
@@ -249,6 +269,11 @@ val prepareNativePayloads = tasks.register<Copy>("prepareNativePayloads") {
     }
     from(layout.buildDirectory.dir("pct")) {
         include("libpct-opace6.so")
+    }
+    // GhostLock54 is packaged under a library name for the same reason binder54 is:
+    // Android only unpacks `lib*.so` out of jniLibs, and the runner execs it as a file.
+    from(layout.buildDirectory.dir("ghost54")) {
+        include("libghostlock54.so")
     }
     // Android only unpacks `lib*.so` from jniLibs, so the executable is packaged under a library
     // name; nativeLibraryDir exposes it at that name and the runner execs it as a file.
@@ -274,6 +299,7 @@ val stripNativePayloads = tasks.register<Exec>("stripNativePayloads") {
         "libcheese-snapdragon.so",
         "libpct-opace6.so",
         "libbinder54.so",
+        "libghostlock54.so",
     ).map { jniLibsDir.file(it).asFile.absolutePath }
     commandLine(listOf(ndkStrip, "--strip-all") + targets)
     inputs.files(targets.map { File(it) })

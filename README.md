@@ -29,7 +29,7 @@ Shizuku is installed and authorised, OpenRoot never needs a pairing code at all.
   build props.
 - **Kernel support status.** The main screen reports whether the connected kernel has a bundled
   profile.
-- **Temporary root, nine engines across seven CVE ids.** The picker lists one row per engine; the
+- **Temporary root, ten engines across eight CVE ids.** The picker lists one row per engine; the
   build that fits the connected device is selected after the row is chosen, so no row is tied to a
   single device. On an arm64 device the app picks whichever engine can run:
   - **CVE-2026-43499** (futex PI UAF): the payload and a profile matching the exact `uname -r` are
@@ -65,6 +65,23 @@ Shizuku is installed and authorised, OpenRoot never needs a pairing code at all.
     driven by the shell script that ships with them, which stages `syms.txt`, derives the KASLR
     slide, runs the attack binary and late-loads `ksud`; the app only copies the files across and
     forwards the log.
+  - **CVE-2020-0069 (MediaTek `mtk-su`)**: the one engine here that is not a kernel exploit. It
+    drives the MediaTek command-queue node from an ordinary app uid, which lands `uid=0` with SELinux
+    already permissive, and then lets `magiskinit` bring up a Magisk 20.4 payload in `/sbin`. Nothing
+    is written to a partition and no bootloader unlock is involved, so it survives no reboot — that
+    is the trade it makes for working on a device that cannot be unlocked at all.
+
+    It is gated on three facts the app reads before running anything: the SoC has to report
+    MediaTek, a command-queue node (`/dev/mtk_cmdq` and its siblings) has to be *openable* by the
+    shell user rather than merely present, and the build's security patch level is compared against
+    the March 2020 fix. A newer patch level does not disable the row — the payload is the only thing
+    that can really answer that — but the row says "expect a failure" instead of pretending. The
+    32/64-bit half is taken from `ro.product.cpu.abilist`, because `mtk-su32` and `mtk-su64` are
+    different binaries and the wrong one only ever fails with `exec format error`.
+
+    Because this engine deploys Magisk rather than KernelSU, it is paired with the legacy manager
+    described below. Its payload is bundled verbatim from `JunioJsv/mtk-easy-su` (`mtk-su32/64`,
+    `magiskinit32/64`, `magisk-boot.sh`); see `THIRD_PARTY_NOTICES.md`.
 
   The Shark and JokerLock rows came from third-party one-key tools and are gated on the kernel
   families those tools were built for. A payload whose own fingerprint check fails prints
@@ -72,8 +89,38 @@ Shizuku is installed and authorised, OpenRoot never needs a pairing code at all.
   any other build, not a bug in the row.
 
   In every case `ksud` is handed to the payload (or staged for it) so KernelSU comes up right after
-  root, and the manager is opened when the handoff reports success. If no manager is installed, the
-  payloads that can keep one leave a root command channel instead.
+  root, and the manager is opened when the handoff reports success.
+
+  When that fails, the run does not fall straight to a shell. `native-or/bootstrap.c` works down a
+  ladder and reports which rung it reached:
+
+  ```
+  ksud late-load  →  Magisk via magiskinit  →  root command channel
+  ```
+
+  The middle rung is what makes a missing `openroot-android*-*.ko` less costly: the kernel bug
+  already produced uid 0, so that root is spent on bringing up Magisk instead of on a bare shell.
+  Success is judged by `/sbin/su` rather than by `magiskinit`'s exit code, which is not reliable
+  across versions. `dfmg1` marks the Magisk rung, `dfm6` KernelSU, and `dfm7` the command channel;
+  `dfme2` alone still means nothing loaded, which is why the Magisk marker is read first.
+
+### Two Magisk managers, paired rather than bundled
+
+  Magisk is deployed at two very different ages, so two managers ship and the app picks by payload:
+
+  | Manager | Pairs with | Why |
+  | --- | --- | --- |
+  | `manager-v8.0.4` | the MediaTek Magisk 20.4 payload in `/sbin` | a modern manager refuses a Magisk this old and offers an update; updating on a locked bootloader is the one way to brick the device |
+  | `v31.1` | a Magisk or KernelSU deployed by a kernel engine | it has to match the daemon it talks to |
+
+  Both releases use the package name `com.topjohnwu.magisk`, so a device holds **one of them at a
+  time** and installing the other replaces it. That is why neither is installed at build time or
+  preinstalled silently: the flavor is chosen from the payload that actually loaded, and installed
+  only when the run reports it. Replacing a modern manager with the legacy one additionally needs an
+  uninstall first, because `pm install -r` refuses to downgrade across that gap. The MediaTek
+  payload prints the same warning its upstream does:
+
+  > DO NOT UPDATE MAGISK THROUGH MAGISK MANAGER OR YOU WILL BRICK YOUR DEVICE ON A LOCKED BOOTLOADER
 
 ## Requirements
 
@@ -298,6 +345,8 @@ app/src/main/java/com/hexo141/liquidglass/
   crypto/     SPAKE2 context, edwards25519 group, scalar reduction
   device/     device information read over ADB
   root/       payload push and execution
+              MtkEasySu.kt     MediaTek bootless path: probe, stage, run
+              MagiskManager.kt the two Magisk managers and their pairing
   ui/         liquid glass components and screens
 native/       arm64 payload sources for CVE-2026-43499 (Makefile)
 native-or/    arm64 payload sources for CVE-2026-43284 (Makefile)
@@ -308,6 +357,7 @@ native-pct/   arm64 payload sources for CVE-2026-64560 (Makefile)
   opace6/     OnePlus Ace 6 port (CVE-2026-64560, 6.6.118 GKI)
 docs/         vulnerability write-ups (CVE-2026-64560)
 app/src/main/assets/kernel_profiles/   bundled kernel profiles
+app/src/main/assets/mtk/               MediaTek payload, bundled from mtk-easy-su
 ```
 
 ## Links
@@ -318,6 +368,10 @@ app/src/main/assets/kernel_profiles/   bundled kernel profiles
 - CVE-2025-21479 upstream (phone build): <https://github.com/Qingizi7/cve-2025-21479_iqooneo8>
 - CVE-2026-64560 upstream: <https://github.com/Wangs-official/opace6-cve-2026-64560>
 - CVE-2026-64560 write-up: [`docs/CVE-2026-64560.md`](docs/CVE-2026-64560.md)
+- CVE-2020-0069 upstream: <https://github.com/JunioJsv/mtk-easy-su>
+- CVE-2020-0069 (`mtk-su`): <https://forum.xda-developers.com/t/amazing-temp-root-for-mediatek-armv8-2020-08-24.3922213/>
+- CVE-2020-0069 background: <https://www.xda-developers.com/mediatek-su-rootkit-exploit/>
+- Magisk upstream: <https://github.com/topjohnwu/Magisk>
 
 ## Continuous integration
 

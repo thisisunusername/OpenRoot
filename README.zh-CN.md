@@ -22,7 +22,7 @@ OpenRoot 是一个 Android 应用，它通过**两种通道之一**连接设备�
 
 - **内核支持状态。** 主界面会报告已连接的内核是否有配套的 profile。
 
-- **临时 root，九个引擎，横跨七个 CVE 编号。** 选择器为每个引擎列一行；选定某一行后，才会挑选适配当前设备的构建，因此没有任何一行绑定到单一机型。在 arm64 设备上，应用会挑选能跑的那个引擎：
+- **临时 root，十个引擎，横跨八个 CVE 编号。** 选择器为每个引擎列一行；选定某一行后，才会挑选适配当前设备的构建，因此没有任何一行绑定到单一机型。在 arm64 设备上，应用会挑选能跑的那个引擎：
 
   - **CVE-2026-43499**（futex PI UAF）：把载荷与匹配精确 `uname -r` 的 profile 推送到 `/data/local/tmp/openroot`，以 `shell` 用户执行。
 
@@ -39,10 +39,36 @@ OpenRoot 是一个 Android 应用，它通过**两种通道之一**连接设备�
   - **CVE-2026-43284**（page cache 写入原语）：加载一个小内核模块。它不需要按设备定制的 profile，只要求内核主/次版本号与某个内置模块镜像匹配；它在应用进程内运行，因为用的是应用自己安装的 IPsec transform。
 
   - **CVE-2026-98260（Shark）** 和 **CVE-2026-61269（Shark）**：随同一批包进来的另外两份移植。`98260` 覆盖 6.18 系列，`61269` 覆盖 6.12 系列。两者都由各自随附的 shell 脚本驱动——脚本布置 `syms.txt`、推导 KASLR 偏移、运行攻击二进制并晚加载 `ksud`；应用只负责把文件拷过去并转发日志。
+  - **CVE-2020-0069（联发科 `mtk-su`）**：这里是唯一一个**不是内核漏洞利用**的引擎。它以普通应用 uid 去驱动联发科命令队列节点，直接拿到 `uid=0`，此时 SELinux 已经是 permissive；随后由 `magiskinit` 在 `/sbin` 里拉起一份 Magisk 20.4 载荷。它不写任何分区、不涉及解锁 bootloader，代价是**重启后不保留**——这正是它能在完全解不开锁的设备上工作的原因。
+
+    跑之前应用会先核对三件事：SoC 必须报告为联发科；命令队列节点（`/dev/mtk_cmdq` 及其同族）必须**能被 shell 用户打开**，而不只是存在；再拿构建的安全补丁级别与 2020 年 3 月的修复作比较。补丁更晚**不会**禁用这一行——真正能回答这个问题的只有载荷本身——但这一行会明说「大概率会失败」，而不是假装没事。32/64 位取自 `ro.product.cpu.abilist`，因为 `mtk-su32` 和 `mtk-su64` 是两个不同的二进制，选错只会得到 `exec format error`。
+
+    由于这个引擎部署的是 Magisk 而不是 KernelSU，它配的是下文所述的老版管理器。它的载荷逐字节取自 `JunioJsv/mtk-easy-su`（`mtk-su32/64`、`magiskinit32/64`、`magisk-boot.sh`），见 `THIRD_PARTY_NOTICES.md`。
 
   Shark 和 JokerLock 这两行来自第三方一键工具，因此被限制在那些工具所针对的内核族上。如果某个载荷自身的指纹校验不通过，它会打印 `TARGET_PROFILE_GATE_FAIL` 并停下，完全不碰内核——在任何其他构建上这都是预期结果，不是这一行的 bug。
 
-  所有情况下，`ksud` 都会交给载荷（或为它布置好），使 KernelSU 在拿到 root 后立刻起来；当交接报告成功时，应用会自动打开管理器。若设备上没装管理器，那些能保留管理器的载荷会留下一个 root 命令通道。
+  所有情况下，`ksud` 都会交给载荷（或为它布置好），使 KernelSU 在拿到 root 后立刻起来；当交接报告成功时，应用会自动打开管理器。
+
+  当这一步失败时，流程不会直接掉到 shell。`native-or/bootstrap.c` 会沿一条梯子往下走，并报告自己走到了哪一级：
+
+  ```
+  ksud late-load  →  经 magiskinit 加载 Magisk  →  root 命令通道
+  ```
+
+  中间那一级正是「没有匹配的 `openroot-android*-*.ko`」变得不那么致命的原因：内核漏洞已经产出了 uid 0，于是这份 root 被用来拉起 Magisk，而不是浪费在一个光秃秃的 shell 上。成功与否看 `/sbin/su` 是否存在，而不看 `magiskinit` 的退出码——后者跨版本并不可靠。`dfmg1` 标记 Magisk 这一级，`dfm6` 是 KernelSU，`dfm7` 是命令通道；单独一个 `dfme2` 仍然表示什么都没加载成功，所以 Magisk 的标记要先读。
+
+### 两个 Magisk 管理器，按载荷配对而非一并安装
+
+  Magisk 是在两个相隔很远的年代被部署的，因此随包带两个管理器，由应用按载荷挑选：
+
+  | 管理器 | 配对的载荷 | 原因 |
+  | --- | --- | --- |
+  | `manager-v8.0.4` | 联发科路径放在 `/sbin` 的 Magisk 20.4 | 新版管理器会拒绝这么老的 Magisk 并提示升级；而在锁定的 bootloader 上升级，是唯一能把设备变砖的办法 |
+  | `v31.1` | 内核引擎部署的现代 Magisk 或 KernelSU | 它必须与自己所对话的守护进程版本匹配 |
+
+  两个发行版的包名都是 `com.topjohnwu.magisk`，所以一台设备同一时间**只能装其中一个**，装另一个会覆盖前者。这就是为什么两者都不在构建期安装、也不会被静默预装：版本由实际加载的载荷决定，并且只在本次运行报告成功时才安装。要把新版换成老版还需先卸载，因为跨这么大的版本差 `pm install -r` 会拒绝降级。联发科载荷会打印与上游一致的警告：
+
+  > 不要通过 Magisk 管理器更新 Magisk，否则在锁定的 bootloader 上会把设备变砖
 
 ## 环境要求
 
@@ -127,7 +153,7 @@ make -C native-pct payload      # 产出 build/pct/libpct-opace6.so
 
 ### 运行漏洞利用
 
-连接成功后，**提权**按钮会出现在日志区域上方（在通道建立前一直隐藏）。点它打开引擎选择器。它会列出九个 CVE 编号；某一行若不可用会说明原因（此内核没有 profile、没有移植版本、GPU 不受支持、没有模块镜像覆盖此内核、此 ABI 未打包载荷）。选定某一行后，才会挑选适配当前设备的载荷。原生日志显示在屏幕底部。
+连接成功后，**提权**按钮会出现在日志区域上方（在通道建立前一直隐藏）。点它打开引擎选择器。它会列出十个 CVE 编号；某一行若不可用会说明原因（此内核没有 profile、没有移植版本、GPU 不受支持、没有模块镜像覆盖此内核、此 ABI 未打包载荷、不是联发科设备、命令队列节点不可打开）。选定某一行后，才会挑选适配当前设备的载荷。原生日志显示在屏幕底部。
 
 状态卡片会为已连接的设备显示 `支持`、`未验证` 或 `不支持`。
 
@@ -207,6 +233,8 @@ app/src/main/java/com/hexo141/liquidglass/
   crypto/     SPAKE2 上下文、edwards25519 群、标量归约
   device/     通过 ADB 读取的设备信息
   root/       载荷推送与执行
+                MtkEasySu.kt     联发科免解锁路径：探测、布置、运行
+                MagiskManager.kt 两个 Magisk 管理器及其配对关系
   ui/         液态玻璃组件与界面
 native/       CVE-2026-43499 的 arm64 载荷源码（Makefile）
 native-or/    CVE-2026-43284 的 arm64 载荷源码（Makefile）
@@ -217,6 +245,7 @@ native-pct/   CVE-2026-64560 的 arm64 载荷源码（Makefile）
   opace6/     一加 Ace 6 移植（CVE-2026-64560，6.6.118 GKI）
 docs/         漏洞分析文档（CVE-2026-64560）
 app/src/main/assets/kernel_profiles/   内置内核 profile
+app/src/main/assets/mtk/               联发科载荷，取自 mtk-easy-su
 ```
 
 ## 相关链接
@@ -227,6 +256,10 @@ app/src/main/assets/kernel_profiles/   内置内核 profile
 - CVE-2025-21479 上游（手机构建）：<https://github.com/Qingizi7/cve-2025-21479_iqooneo8>
 - CVE-2026-64560 上游：<https://github.com/Wangs-official/opace6-cve-2026-64560>
 - CVE-2026-64560 分析：[`docs/CVE-2026-64560.md`](docs/CVE-2026-64560.md)
+- CVE-2020-0069 上游：<https://github.com/JunioJsv/mtk-easy-su>
+- CVE-2020-0069（`mtk-su`）：<https://forum.xda-developers.com/t/amazing-temp-root-for-mediatek-armv8-2020-08-24.3922213/>
+- CVE-2020-0069 背景：<https://www.xda-developers.com/mediatek-su-rootkit-exploit/>
+- Magisk 上游：<https://github.com/topjohnwu/Magisk>
 
 ## 持续集成
 
@@ -234,7 +267,7 @@ app/src/main/assets/kernel_profiles/   内置内核 profile
 
 ## 与原版的差异
 
-本仓库在 [`hexo141/Openroot`](https://github.com/hexo141/Openroot) 的基础上加入了 Shizuku 通道。其余部分——九个引擎、内核 profile、液态玻璃界面——保持一致。
+本仓库在 [`hexo141/Openroot`](https://github.com/hexo141/Openroot) 的基础上加入了 Shizuku 通道，以及联发科引擎和 Magisk 降级这两层。其余部分——内核 profile、液态玻璃界面——保持一致。
 
 - 新增：`adb/ShellStream.kt`、`adb/AdbStreamAdapter.kt`、`adb/ShizukuStream.kt`、`adb/ShizukuShell.kt`。
 - 修改：`adb/AbsAdbConnectionManager.java`（新增 `ShellProvider` 委托与 `ShellStream` 的 `openStream`）、`adb/AdbShell.kt`、`adb/AdbConnectionManager.kt`、`MainActivity.kt`、`ui/PairingScreen.kt`、`AndroidManifest.xml`、`gradle/libs.versions.toml`、`app/build.gradle.kts`、`.gitignore`、本工作流。

@@ -83,6 +83,26 @@ The vulnerability code is unchanged; there are exactly two local changes:
   (`native-or/bootstrap.c`) instead of sitting in an interactive shell nobody types into;
 - the directory split and the NDK Makefile (`native-pct/Makefile`).
 
+## MediaTek payload (CVE-2020-0069)
+
+`app/src/main/assets/mtk/` holds five files taken verbatim from
+[`JunioJsv/mtk-easy-su`](https://github.com/JunioJsv/mtk-easy-su) (`app/src/main/assets/`), itself
+built on Diophantine's `mtk-su`:
+
+| File | What it is |
+| --- | --- |
+| `mtk-su32`, `mtk-su64` | the exploit binary, ARM / AArch64, dynamically linked against `/system/bin/linker[64]` |
+| `magiskinit32`, `magiskinit64` | static ARM builds of `magiskinit` from Magisk 20.4 |
+| `magisk-boot.sh` | the upstream script that runs `mtk-su`, then `magiskinit` |
+
+They are copied byte for byte and are **not** rebuilt from source here, so their SHA-256 digests are
+the only guarantee that what ships is what upstream published. Nothing in this tree patches them.
+`mtk-easy-su` is distributed under the MIT licence; `mtk-su` was published by its author as a
+free-to-use temporary-root tool. Neither project relicense the other.
+
+Note that `magiskinit32/64` are old binaries on purpose: they pair with Magisk 20.4, and that pairing
+is what the legacy Magisk manager (documented in `README.md`) expects.
+
 ## Bundled wallpaper
 
 `app/src/main/res/drawable-nodpi/bg.jpg` was provided by the user of this project (from a local

@@ -40,6 +40,8 @@ import com.hexo141.liquidglass.root.GhostLockRunner
 import com.hexo141.liquidglass.root.GpuRunner
 import com.hexo141.liquidglass.root.JokerRunner
 import com.hexo141.liquidglass.root.KsuManager
+import com.hexo141.liquidglass.root.MagiskManager
+import com.hexo141.liquidglass.root.MtkEasySu
 import com.hexo141.liquidglass.root.PctRunner
 import com.hexo141.liquidglass.root.RootExploit
 import com.hexo141.liquidglass.root.RootHandoff
@@ -1191,7 +1193,7 @@ class MainActivity : AppCompatActivity() {
                     /* MediaTek is dispatched before anything else and never reaches the KernelSU
                      * resolution above: it deploys Magisk, not ksud, so a manager scan would be
                      * both pointless and misleading in the log. */
-                    engineId == ENGINE_MEDIATEK -> runMediatekEngine(info)
+                    engineId == ENGINE_MEDIATEK -> runMediatekEngine()
                     engineId == ENGINE_CVE_43499 -> runProfileEngine(info, ksud)
                     engineId == ENGINE_CVE_0041 -> runBinderEngine(info, ksud)
                     engineId == ENGINE_JOKER_OGKI -> runJokerEngine(info, ksud)
@@ -1240,7 +1242,7 @@ class MainActivity : AppCompatActivity() {
      * - there is no KernelSU manager to open afterwards. Success means `/sbin/su` exists, and the
      *   manager to install is the legacy one, which [reportHandoff] handles through the payload tag.
      */
-    private fun runMediatekEngine(info: DeviceInfo): String {
+    private fun runMediatekEngine(): String {
         val manager = AdbConnectionManager.get(this)
         // The half is decided by the probe, which reads the device's own ABI list: `mtk-su32` and
         // `mtk-su64` are different binaries and the wrong one dies with `exec format error`.

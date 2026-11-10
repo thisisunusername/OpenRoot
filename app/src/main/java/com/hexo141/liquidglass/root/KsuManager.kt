@@ -289,22 +289,36 @@ object KsuManager {
     ): InstallResult {
         val remote = "/data/local/tmp/openroot/kernelsu-manager.apk"
         onLine("<i> looking up the latest KernelSU release")
-        val tag = latestManagerTag() ?: return InstallResult(false, "cannot read the release list")
+        val release = latestManagerRelease()
+        val tag = release?.first ?: return InstallResult(false, "cannot read the release list")
         onLine("<i> latest release: $tag")
-        val urls = MANAGER_URLS.map { it.replace("\$TAG", tag) }
+
+        // The API's own URL first, then the same file through the mirror. Guessing by tag is not an
+        // option: the asset name has a second number the tag does not carry.
+        val urls = buildList {
+            release?.second?.let {
+                add("https://v6.gh-proxy.org/$it")
+                add(it)
+            }
+            MANAGER_URLS.mapTo(this) { it.replace("\$TAG", tag) }
+        }
+
         var downloaded = false
         for (url in urls) {
             onLine("$ curl -L -o $remote '$url'")
+            // `-f` so an HTTP error is a non-zero exit instead of a 404 page saved as the APK; without
+            // it curl reports success and the failure only shows up as a bogus `pm install` error.
             val fetch = runCatching {
                 AdbShell.exec(
                     manager,
                     "mkdir -p /data/local/tmp/openroot && " +
-                        "curl -sSL --max-time 180 -o $remote '$url' && ls -l $remote",
+                        "curl -fsSL --max-time 180 -o $remote '$url' && ls -l $remote",
                     240_000L,
                 )
             }.getOrDefault("")
             onLine(fetch.trimEnd())
-            // A mirror that answers 404 writes an HTML page, so check the magic rather than the size.
+            // Both checks: `-f` catches HTTP errors, the magic catches a mirror that answers 200 with
+            // an HTML page of its own.
             val magic = runCatching {
                 AdbShell.exec(manager, "head -c 2 $remote 2>/dev/null")
             }.getOrDefault("")
@@ -332,21 +346,40 @@ object KsuManager {
         }
     }
 
-    /** Tags the app tries, in order: raw GitHub first, then the mirror used for everything else. */
+    /**
+     * Tags the app tries, in order: raw GitHub first, then the mirror used for everything else.
+     *
+     * `\$TAG` is deliberately escaped: these are templates and [downloadAndInstallManager] fills the
+     * literal `$TAG` in. It is only a fallback now, because KernelSU's asset name carries a second
+     * number the tag does not (`KernelSU_v3.3.1_32680-release.apk`), so guessing the file name from
+     * the tag alone gets a 404. The authoritative list comes from [latestManagerRelease].
+     */
     private val MANAGER_URLS = listOf(
-        "https://v6.gh-proxy.org/https://github.com/$MANAGER_REPO/releases/download/\$TAG/KernelSU_\$TAG.apk",
-        "https://v6.gh-proxy.org/https://github.com/$MANAGER_REPO/releases/latest/download/KernelSU.apk",
-        "https://github.com/$MANAGER_REPO/releases/download/\$TAG/KernelSU_\$TAG.apk",
+        "https://v6.gh-proxy.org/https://github.com/$MANAGER_REPO/releases/download/\$TAG/KernelSU_\$TAG_32680-release.apk",
+        "https://github.com/$MANAGER_REPO/releases/download/\$TAG/KernelSU_\$TAG_32680-release.apk",
     )
 
-    /** Newest release tag from the GitHub API, or null when the list cannot be read. */
-    private fun latestManagerTag(): String? = runCatching {
+    /**
+     * Newest release tag and its APK URL, read from the API.
+     *
+     * The asset name is not derivable from the tag: `v3.3.1` ships `KernelSU_v3.3.1_32680-release.apk`,
+     * where `32680` is the kernel-side version. Building the URL by hand therefore always 404s, which
+     * is exactly what used to happen — the download "succeeded", wrote an HTML error page, and the
+     * install failed later with a message that pointed at `pm` instead of at the URL.
+     */
+    private fun latestManagerRelease(): Pair<String, String>? = runCatching {
         val endpoint = "https://api.github.com/repos/$MANAGER_REPO/releases/latest"
         val connection = java.net.URL(endpoint).openConnection() as java.net.HttpURLConnection
         connection.connectTimeout = 15_000
         connection.readTimeout = 15_000
         connection.setRequestProperty("Accept", "application/vnd.github+json")
         val body = connection.inputStream.bufferedReader().use { it.readText() }
-        Regex("\"tag_name\"\\s*:\\s*\"([^\"]+)\"").find(body)?.groupValues?.get(1)
+        val tag = Regex("\"tag_name\"\\s*:\\s*\"([^\"]+)\"").find(body)?.groupValues?.get(1)
+            ?: return@runCatching null
+        // Only manager APKs: the release also carries ksud, ksuinit and lkm-*.ko assets.
+        val apk = Regex("\"browser_download_url\"\\s*:\\s*\"([^\"]*/KernelSU_[^\"/]+\\.[Aa][Pp][Kk])\"")
+            .find(body)?.groupValues?.get(1)
+            ?: return@runCatching null
+        tag to apk
     }.getOrNull()
 }

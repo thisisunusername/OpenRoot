@@ -23,20 +23,20 @@ BUILD_DIR ?= ../build/ghost54
 OUT := $(BUILD_DIR)
 
 # `ghostlock54` ships as `libghostlock54.so` so it lands in the APK's jniLibs: a `.so` is the only
-# file type the packaging step installs verbatim without touching its bytes. It is linked (not
-# freestanding) because setcon() lives in libselinux.
+# file type the packaging step installs verbatim without touching its bytes.
+#
+# No `-lselinux`: the NDK does not ship libselinux at all (its headers are AOSP-only), so the one
+# call the payload needed — setcon() — is inlined over /proc/self/attr/current in ghostlock54.c.
 #
 # `-pthread` is not optional. The payload forks a child that keeps writing the log while the parent
 # drives the kernel write, and the two share a mutex so lines do not interleave; without `-pthread`
 # bionic resolves pthread_mutex_* to stubs that return ENOSYS and the log silently loses its tail.
-# `-lselinux` is required for setcon(); liblog is deliberately absent because the payload logs with
-# its own pr_* helpers to stdout rather than through __android_log_print.
 
 TARGET := $(OUT)/libghostlock54.so
 SRC := ghostlock54.c
 
 CFLAGS := -O2 -fPIE -fPIC -Wall -Wextra -Wno-unused-parameter -D_GNU_SOURCE -pthread
-LDFLAGS := -pie -pthread -lselinux
+LDFLAGS := -pie -pthread
 
 all: $(TARGET)
 
